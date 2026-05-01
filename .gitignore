@@ -9,6 +9,7 @@ lerna-debug.log*
 
 android/*
 node_modules/*
+server/node_modules/*
 dist
 dist-ssr
 *.local
