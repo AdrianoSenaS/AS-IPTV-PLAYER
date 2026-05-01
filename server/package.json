@@ -1,0 +1,21 @@
+{
+  "name": "as-iptv-realtime-server",
+  "version": "1.0.0",
+  "description": "Servidor real-time para presença e controle parental do AS-IPTV",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.9.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.5",
+    "uuid": "^11.0.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

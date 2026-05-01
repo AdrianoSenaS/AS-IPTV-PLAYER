@@ -1,6 +1,7 @@
 import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { getDbValue } from '@/services/local-db';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,20 +13,25 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { SafeAreaView, } from 'react-native-safe-area-context';
-
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { AppBackdrop } from '@/components/app-backdrop';
+import { GlassSurface } from '@/components/glass-surface';
+import { PageLoader } from '@/components/page-loader';
+import { StreamingTheme } from '@/constants/streaming-theme';
+import { hasLocalCatalogDataQuick } from '@/services/catalog-data';
+import { enableDemoMode } from '@/services/demo-mode';
 import { useLogin } from '../hooks/UseLogin';
 import { LoginUserStream } from '../services/login';
 
 export default function LoginScreen() {
- 
   const [showPassword, setShowPassword] = useState(false);
-  const { _Name,
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
+  const {
+    _Name,
     SetName,
     _Usuario,
     SetUsuario,
@@ -34,224 +40,156 @@ export default function LoginScreen() {
     _Url,
     SetUrl,
     _Loanding,
-    SetLoading
+    SetLoading,
   } = useLogin();
 
-  const router = useRouter()
+  const router = useRouter();
 
+  useEffect(() => {
+    const bootstrap = async () => {
+      const userDb = await getDbValue<string>('username');
+      if (userDb) {
+        const hasLocalCatalog = await hasLocalCatalogDataQuick();
+        router.replace(hasLocalCatalog ? '/(tabs)' : '/loading');
+        return;
+      }
+      setIsLoading(false);
+    };
 
-  const Login = async () => {
-    const userDb = await AsyncStorage.getItem('username')
-    if (userDb === null) {
-      console.log(userDb)
-    } else {
-      router.replace('/loading')
-    }
-    
-  }
+    bootstrap();
+  }, [router]);
 
   const handleLogin = async () => {
-    // Validação básica
     if (!_Name || !_Usuario || !_Senha || !_Url) {
-      Alert.alert('Atenção', 'Por favor, preencha todos os campos!');
+      Alert.alert('Atencao', 'Preencha todos os campos para continuar.');
       return;
     }
 
     SetLoading(true);
+    const result = await LoginUserStream(_Name, _Usuario, _Senha, _Url);
 
-    if (_Name === "" || _Usuario === "" || _Senha === "" || _Url === "") {
-      SetLoading(false)
-      return Alert.alert('Notificação', 'Preencha todos os dado!')
-    }
-    const result = LoginUserStream(_Name, _Usuario, _Senha, _Url);
-    if (await result !== "Ok") {
-      Alert.alert('Notificação', 'Erro ao conectar!')
-      SetLoading(false)
-      return
+    if (result !== 'Ok') {
+      Alert.alert('Erro', 'Nao foi possivel conectar ao servidor com estes dados.');
+      SetLoading(false);
+      return;
     }
 
-    router.replace('/(tabs)')
+    router.replace('/loading');
   };
 
-    useEffect(()=>{
-      Login();
-    }, [])
+  const handleDemoMode = async () => {
+    try {
+      setIsDemoLoading(true);
+      await enableDemoMode();
+      router.replace('/loading');
+    } catch {
+      Alert.alert('Erro', 'Nao foi possivel iniciar o modo demo.');
+      setIsDemoLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
-          {/* Cabeçalho com gradiente */}
-          <LinearGradient
-            colors={['#7e1a1aff', '#a70101ff', '#812a2aff']}
-            style={styles.header}
-          >
-            <View style={styles.logoContainer}>
-              <MaterialIcons name="live-tv" size={60} color="#fff" />
-              <Text style={styles.appTitle}>AS IPTV</Text>
-              <Text style={styles.appSubtitle}>Sua Melhor Experiência em Streaming</Text>
+      <AppBackdrop blurIntensity={34} />
+      <PageLoader visible={isLoading} label="Verificando acesso" />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.hero}>
+            <View style={styles.logoCircle}>
+              <MaterialIcons name="live-tv" size={34} color={StreamingTheme.colors.textPrimary} />
             </View>
-          </LinearGradient>
-
-          {/* Mensagem de boas-vindas */}
-          <View style={styles.welcomeContainer}>
-            <Text style={styles.welcomeTitle}>Bem-vindo de volta!</Text>
-            <Text style={styles.welcomeText}>
-              Acesse milhares de canais, filmes e séries com a melhor qualidade do mercado.
-            </Text>
+            <Text style={styles.brand}>AS IPTV PLAYER</Text>
+            <Text style={styles.subtitle}>Uma interface de cinema, feita para maratonar.</Text>
           </View>
 
-          {/* Formulário de Login */}
-          <View style={styles.formContainer}>
-            <Text style={styles.sectionTitle}>Login</Text>
+          <GlassSurface style={styles.panel} intensity={40}>
+            <Text style={styles.panelTitle}>Entrar na sua conta</Text>
 
-            {/* Node da Conta */}
-            <View style={styles.inputContainer}>
-              <View style={styles.inputLabel}>
-                <MaterialIcons name="dns" size={20} color="#ff0000ff" />
-                <Text style={styles.label}
-                >Nome da Conta</Text>
-              </View>
+            <Field
+              icon="badge"
+              label="Nome da conta"
+              placeholder="Ex: MinhaCasa"
+              value={_Name}
+              onChangeText={SetName}
+            />
+
+            <Field
+              icon="person"
+              label="Usuario"
+              placeholder="Seu usuario"
+              value={_Usuario}
+              onChangeText={SetUsuario}
+            />
+
+            <Text style={styles.label}>Senha</Text>
+            <View style={styles.inputRow}>
+              <Feather name="lock" size={18} color={StreamingTheme.colors.textMuted} />
               <TextInput
+                placeholder="Sua senha"
+                placeholderTextColor={StreamingTheme.colors.textMuted}
+                secureTextEntry={!showPassword}
                 style={styles.input}
-                placeholder="Ex: asdry"
-                placeholderTextColor="#999"
-                value={_Name}
-                onChangeText={SetName}
-                autoCapitalize="none"
+                value={_Senha}
+                onChangeText={SetSenha}
               />
-            </View>
-
-            {/* Usuário */}
-            <View style={styles.inputContainer}>
-              <View style={styles.inputLabel}>
-                <MaterialIcons name="person" size={20} color="#ff0000ff" />
-                <Text style={styles.label}>Usuário</Text>
-              </View>
-              <TextInput
-                style={styles.input}
-                placeholder="Digite seu usuário"
-                placeholderTextColor="#999"
-                value={_Usuario}
-                onChangeText={SetUsuario}
-                autoCapitalize="none"
-              />
-            </View>
-
-            {/* Senha */}
-            <View style={styles.inputContainer}>
-              <View style={styles.inputLabel}>
-                <MaterialIcons name="lock" size={20} color="#ff0000ff" />
-                <Text style={styles.label}>Senha</Text>
-              </View>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={[styles.input, { flex: 1 }]}
-                  placeholder="Digite sua senha"
-                  placeholderTextColor="#999"
-                  secureTextEntry={!showPassword}
-                  value={_Senha}
-                  onChangeText={SetSenha}
+              <TouchableOpacity onPress={() => setShowPassword((prev) => !prev)}>
+                <Feather
+                  name={showPassword ? 'eye-off' : 'eye'}
+                  size={18}
+                  color={StreamingTheme.colors.textSecondary}
                 />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                  <Feather
-                    name={showPassword ? "eye-off" : "eye"}
-                    size={24}
-                    color="#666"
-                  />
-                </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             </View>
 
-            {/* URL do Servidor */}
-            <View style={styles.inputContainer}>
-              <View style={styles.inputLabel}>
-                <MaterialIcons name="link" size={20} color="#ff0000ff" />
-                <Text style={styles.label}>URL do Servidor</Text>
-              </View>
-              <TextInput
-                style={styles.input}
-                placeholder="https://seuservidor.com"
-                placeholderTextColor="#999"
-                value={_Url}
-                onChangeText={SetUrl}
-                autoCapitalize="none"
-                keyboardType="url"
-              />
-            </View>
+            <Field
+              icon="link"
+              label="URL do servidor"
+              placeholder="http://seuservidor.com"
+              value={_Url}
+              onChangeText={SetUrl}
+              keyboardType="url"
+            />
 
-
-
-            {/* Botão de Continuar */}
-            <TouchableOpacity
-              style={styles.loginButton}
-              onPress={handleLogin}
-              disabled={_Loanding}
-            >
-              <LinearGradient
-                colors={['#ff0000ff', '#111111ff']}
-                style={styles.gradientButton}
-              >
+            <TouchableOpacity style={styles.loginBtn} onPress={handleLogin} disabled={_Loanding}>
+              <LinearGradient colors={StreamingTheme.gradients.accent} style={styles.loginGradient}>
                 {_Loanding ? (
-                  <ActivityIndicator color="#ffffffff" />
+                  <ActivityIndicator color={StreamingTheme.colors.textPrimary} />
                 ) : (
                   <>
-                    <Text style={styles.loginButtonText}>Continuar</Text>
-                    <MaterialIcons name="arrow-forward" size={24} color="#fff" />
+                    <Text style={styles.loginText}>Conectar agora</Text>
+                    <MaterialIcons name="arrow-forward" size={20} color={StreamingTheme.colors.textPrimary} />
                   </>
                 )}
               </LinearGradient>
             </TouchableOpacity>
+
+            <TouchableOpacity style={styles.demoBtn} onPress={handleDemoMode} disabled={isDemoLoading || _Loanding}>
+              {isDemoLoading ? (
+                <ActivityIndicator color={StreamingTheme.colors.textPrimary} />
+              ) : (
+                <>
+                  <MaterialIcons name="smart-display" size={18} color={StreamingTheme.colors.textPrimary} />
+                  <Text style={styles.demoBtnText}>Entrar no modo demo (sem Xtream)</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.demoHint}>
+              Ideal para revisao de loja: carrega catalogo local de teste sem credenciais.
+            </Text>
+          </GlassSurface>
+
+          <View style={styles.featureRow}>
+            <Feature icon="4k" title="Imagem" desc="Qualidade premium" />
+            <Feature icon="speed" title="Rapido" desc="Player otimizado" />
+            <Feature icon="download" title="Offline" desc="Baixe e assista" />
           </View>
 
-          {/* Recursos do App */}
-          <View style={styles.featuresContainer}>
-            <Text style={styles.featuresTitle}>Recursos AS IPTV</Text>
-
-            <View style={styles.featuresGrid}>
-              <View style={styles.featureCard}>
-                <MaterialIcons name="download" size={30} color="#ff0000ff" />
-                <Text style={styles.featureTitle}>Download</Text>
-                <Text style={styles.featureDesc}>Baixe conteúdos para assistir offline</Text>
-              </View>
-
-              <View style={styles.featureCard}>
-                <MaterialIcons name="speed" size={30} color="#ff0000ff" />
-                <Text style={styles.featureTitle}>Otimização</Text>
-                <Text style={styles.featureDesc}>Streaming adaptável à sua conexão</Text>
-              </View>
-
-              <View style={styles.featureCard}>
-                <MaterialIcons name="high-quality" size={30} color="#ff0000ff" />
-                <Text style={styles.featureTitle}>Qualidade 4K</Text>
-                <Text style={styles.featureDesc}>Suporte a até 4K HDR</Text>
-              </View>
-
-              <View style={styles.featureCard}>
-                <MaterialIcons name="library-books" size={30} color="#ff0000ff" />
-                <Text style={styles.featureTitle}>EPG Completo</Text>
-                <Text style={styles.featureDesc}>Guia de programação detalhado</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Informações Adicionais */}
-          <View style={styles.infoContainer}>
-            <Link href={"/ajuda"} style={styles.infoLink}>
-              <MaterialIcons name="help-outline" size={20} color="#ff0000ff" />
-              <Text style={styles.infoLinkText}>Precisa de ajuda?</Text>
+          <View style={styles.footerRow}>
+            <Link href="/ajuda" style={styles.helpLink}>
+              Precisa de ajuda?
             </Link>
-
-
-          </View>
-
-          {/* Rodapé */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>AS IPTV v2.4.1</Text>
-            <Text style={styles.footerSubtext}>© 2025 AS IPTV - Todos os direitos reservados</Text>
+            <Text style={styles.version}>v1.0.0  </Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -259,234 +197,176 @@ export default function LoginScreen() {
   );
 }
 
+type FieldProps = {
+  icon: keyof typeof MaterialIcons.glyphMap;
+  label: string;
+  placeholder: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  keyboardType?: 'default' | 'url';
+};
+
+function Field({ icon, label, placeholder, value, onChangeText, keyboardType = 'default' }: FieldProps) {
+  return (
+    <>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.inputRow}>
+        <MaterialIcons name={icon} size={18} color={StreamingTheme.colors.textMuted} />
+        <TextInput
+          placeholder={placeholder}
+          placeholderTextColor={StreamingTheme.colors.textMuted}
+          style={styles.input}
+          value={value}
+          onChangeText={onChangeText}
+          autoCapitalize="none"
+          keyboardType={keyboardType}
+        />
+      </View>
+    </>
+  );
+}
+
+function Feature({ icon, title, desc }: { icon: keyof typeof MaterialIcons.glyphMap; title: string; desc: string }) {
+  return (
+    <GlassSurface style={styles.featureCard} intensity={28}>
+      <MaterialIcons name={icon} size={20} color={StreamingTheme.colors.accentAlt} />
+      <Text style={styles.featureTitle}>{title}</Text>
+      <Text style={styles.featureDesc}>{desc}</Text>
+    </GlassSurface>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000000ff',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContainer: {
-    flexGrow: 1,
-  },
-  header: {
-    paddingTop: 50,
-    paddingBottom: 30,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
+  container: { flex: 1, backgroundColor: StreamingTheme.colors.background },
+  flex: { flex: 1 },
+  scrollContent: { paddingHorizontal: 18, paddingBottom: 34 },
+  hero: { alignItems: 'center', marginTop: 12, marginBottom: 18 },
+  logoCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
-  },
-  logoContainer: {
-    alignItems: 'center',
-  },
-  appTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 10,
-  },
-  appSubtitle: {
-    fontSize: 14,
-    color: '#e8eaf6',
-    marginTop: 5,
-  },
-  welcomeContainer: {
-    padding: 20,
-    backgroundColor: '#272626ff',
-    margin: 20,
-    borderRadius: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  welcomeTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#ffffffff',
+    justifyContent: 'center',
     marginBottom: 10,
   },
-  welcomeText: {
+  brand: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  subtitle: {
+    color: StreamingTheme.colors.textSecondary,
     fontSize: 14,
-    color: '#d3d2d2ff',
-    lineHeight: 20,
+    marginTop: 6,
   },
-  formContainer: {
-    backgroundColor: '#272626ff',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+  panel: {
+    padding: 16,
+    marginBottom: 16,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#ffffffff',
-    marginBottom: 20,
-  },
-  inputContainer: {
-    marginBottom: 15,
-  },
-  inputLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
+  panelTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
+    fontSize: 20,
+    marginBottom: 12,
   },
   label: {
-    marginLeft: 8,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffffff',
+    color: StreamingTheme.colors.textSecondary,
+    marginBottom: 8,
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: '700',
   },
-  input: {
+  inputRow: {
+    height: 50,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 15,
-    fontSize: 16,
-    backgroundColor: '#fafafa',
-  },
-  passwordContainer: {
+    borderColor: StreamingTheme.colors.border,
+    paddingHorizontal: 12,
+    backgroundColor: StreamingTheme.colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    backgroundColor: '#fafafa',
-    paddingRight: 15,
-  },
-  quickServersContainer: {
-    marginTop: 10,
-    marginBottom: 20,
-  },
-  quickServersTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  serversGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 10,
   },
-  serverButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#e8eaf6',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 20,
+  input: {
+    color: StreamingTheme.colors.textPrimary,
     flex: 1,
-    minWidth: '45%',
+    fontSize: 15,
   },
-  serverText: {
-    marginLeft: 8,
-    fontSize: 12,
-    color: '#ff0000ff',
-    flex: 1,
-  },
-  loginButton: {
-    marginTop: 10,
-    borderRadius: 12,
+  loginBtn: {
+    marginTop: 16,
+    borderRadius: 14,
     overflow: 'hidden',
   },
-  gradientButton: {
+  loginGradient: {
+    minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 18,
+    gap: 8,
   },
-  loginButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginRight: 10,
-  },
-  featuresContainer: {
-    backgroundColor: '#272626ff',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 15,
-    shadowColor: '#494747ff',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  featuresTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#ffffffff',
-    marginBottom: 15,
-  },
-  featuresGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 3,
-  },
-  featureCard: {
-    width: '48%',
-    backgroundColor: '#000000ff',
-    padding: 15,
-    margin: 2,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  featureTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#ff0000ff',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  featureDesc: {
-    fontSize: 11,
-    color: '#666',
-    textAlign: 'center',
-  },
-  infoContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginHorizontal: 20,
-    marginBottom: 20,
-  },
-  infoLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-  },
-  infoLinkText: {
-    marginLeft: 8,
-    color: '#ff0000ff',
-    fontWeight: '500',
-  },
-  footer: {
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#a70101ff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    marginTop: 10,
-  },
-  footerText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  loginText: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
     fontSize: 16,
   },
-  footerSubtext: {
-    color: '#e8eaf6',
+  demoBtn: {
+    marginTop: 10,
+    minHeight: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  demoBtnText: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  demoHint: {
+    marginTop: 8,
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  featureRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  featureCard: {
+    flex: 1,
+    padding: 12,
+  },
+  featureTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '700',
+    marginTop: 8,
+    fontSize: 13,
+  },
+  featureDesc: {
+    color: StreamingTheme.colors.textMuted,
+    marginTop: 4,
+    fontSize: 11,
+  },
+  footerRow: {
+    marginTop: 18,
+    alignItems: 'center',
+    gap: 8,
+  },
+  helpLink: {
+    color: StreamingTheme.colors.info,
+    fontWeight: '700',
+  },
+  version: {
+    color: StreamingTheme.colors.textMuted,
     fontSize: 12,
-    marginTop: 5,
-    textAlign: 'center',
   },
 });

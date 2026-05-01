@@ -1,0 +1,1432 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AS IPTV Player — Streaming Premium na Palma da Sua Mão</title>
+  <meta name="description" content="AS IPTV Player: player de filmes, séries e TV ao vivo com algoritmo inteligente, downloads offline, controle parental e muito mais. Disponível para Android." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:         #07090F;
+      --bg-soft:    #101525;
+      --surface:    #161B2E;
+      --surface-alt:#1C2340;
+      --border:     rgba(255,255,255,0.10);
+      --glass-bg:   rgba(255,255,255,0.06);
+      --glass-border: rgba(255,255,255,0.12);
+      --text:       #F7F9FF;
+      --text-sec:   #A8B2D1;
+      --text-muted: #7F89A8;
+      --accent:     #FF3B30;
+      --accent-alt: #FF8F3A;
+      --green:      #2CD07F;
+      --blue:       #5DA9FF;
+      --yellow:     #FFC857;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ─── Header ─── */
+    header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 1000;
+      padding: 16px 6%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(7,9,15,0.75);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--glass-border);
+      transition: padding .3s;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .logo-icon {
+      width: 38px; height: 38px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    .logo-name {
+      font-size: 1.2rem;
+      font-weight: 800;
+      background: linear-gradient(90deg, var(--accent), var(--accent-alt));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      letter-spacing: -.5px;
+    }
+
+    nav {
+      display: flex;
+      gap: 28px;
+      align-items: center;
+    }
+
+    nav a {
+      color: var(--text-sec);
+      text-decoration: none;
+      font-size: .88rem;
+      font-weight: 500;
+      transition: color .2s;
+    }
+
+    nav a:hover { color: var(--text); }
+
+    .nav-cta {
+      background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+      color: #fff !important;
+      padding: 9px 20px;
+      border-radius: 50px;
+      font-weight: 700;
+      font-size: .84rem;
+      transition: opacity .2s, transform .2s !important;
+    }
+
+    .nav-cta:hover { opacity: .88; transform: translateY(-1px); }
+
+    .hamburger {
+      display: none;
+      flex-direction: column;
+      gap: 5px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    .hamburger span {
+      display: block; width: 24px; height: 2px;
+      background: var(--text);
+      border-radius: 2px;
+      transition: .3s;
+    }
+
+    /* ─── Hero ─── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 120px 6% 80px;
+      position: relative;
+      overflow: hidden;
+      background: radial-gradient(ellipse 140% 80% at 50% -10%, #1E0E2F 0%, #0D1A38 50%, var(--bg) 100%);
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: .35;
+      pointer-events: none;
+    }
+
+    .orb-1 { width: 600px; height: 600px; top: -200px; left: -150px; background: radial-gradient(circle, #FF3B30 0%, transparent 70%); }
+    .orb-2 { width: 500px; height: 500px; top: -100px; right: -100px; background: radial-gradient(circle, #FF8F3A 0%, transparent 70%); opacity: .2; }
+    .orb-3 { width: 400px; height: 400px; bottom: -100px; left: 30%; background: radial-gradient(circle, #5DA9FF 0%, transparent 70%); opacity: .15; }
+
+    .hero-content { position: relative; z-index: 1; max-width: 780px; }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255,59,48,.15);
+      border: 1px solid rgba(255,59,48,.3);
+      border-radius: 50px;
+      padding: 6px 16px;
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 24px;
+      animation: fadeInUp .8s ease both;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.2rem, 5.5vw, 3.8rem);
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: -1.5px;
+      margin-bottom: 20px;
+      animation: fadeInUp .8s ease .1s both;
+    }
+
+    .grad {
+      background: linear-gradient(90deg, var(--accent), var(--accent-alt));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .hero-sub {
+      font-size: 1.05rem;
+      color: var(--text-sec);
+      max-width: 580px;
+      margin: 0 auto 36px;
+      animation: fadeInUp .8s ease .2s both;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+      animation: fadeInUp .8s ease .3s both;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 13px 26px;
+      border-radius: 50px;
+      font-weight: 700;
+      font-size: .92rem;
+      text-decoration: none;
+      transition: transform .2s, box-shadow .2s, opacity .2s;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-accent {
+      background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+      color: #fff;
+      box-shadow: 0 8px 28px rgba(255,59,48,.3);
+    }
+
+    .btn-accent:hover { transform: translateY(-3px); box-shadow: 0 14px 36px rgba(255,59,48,.4); }
+
+    .btn-glass {
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.14);
+      color: var(--text);
+      backdrop-filter: blur(12px);
+    }
+
+    .btn-glass:hover { background: rgba(255,255,255,.12); transform: translateY(-2px); }
+
+    .hero-stats {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      margin-top: 56px;
+      flex-wrap: wrap;
+      animation: fadeInUp .8s ease .5s both;
+    }
+
+    .stat { text-align: center; }
+    .stat-num { font-size: 2rem; font-weight: 800; background: linear-gradient(90deg, var(--accent), var(--accent-alt)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .stat-label { font-size: .78rem; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
+
+    /* ─── Sections ─── */
+    section { padding: 90px 6%; }
+
+    .section-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,59,48,.12);
+      border: 1px solid rgba(255,59,48,.25);
+      border-radius: 50px;
+      padding: 5px 14px;
+      font-size: .72rem;
+      font-weight: 700;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-bottom: 14px;
+    }
+
+    .section-title {
+      font-size: clamp(1.7rem, 3.5vw, 2.6rem);
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 12px;
+    }
+
+    .hi { color: var(--accent); }
+
+    .section-sub {
+      font-size: 1rem;
+      color: var(--text-sec);
+      max-width: 560px;
+    }
+
+    .section-header { margin-bottom: 52px; }
+    .section-header.center { text-align: center; }
+    .section-header.center .section-sub { margin: 0 auto; }
+
+    /* ─── Free section ─── */
+    .free-section { background: var(--bg); }
+
+    .free-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+
+    .free-card {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 18px;
+      padding: 28px 24px;
+      transition: transform .25s, border-color .25s;
+    }
+
+    .free-card:hover { transform: translateY(-6px); border-color: rgba(255,255,255,.2); }
+
+    .free-card-icon {
+      width: 48px; height: 48px;
+      background: rgba(255,59,48,.12);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+
+    .free-pill {
+      display: inline-block;
+      background: rgba(44,208,127,.12);
+      border: 1px solid rgba(44,208,127,.3);
+      color: var(--green);
+      font-size: .7rem;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 50px;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
+    .free-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+    .free-card p { font-size: .85rem; color: var(--text-sec); line-height: 1.55; }
+
+    /* ─── Features section ─── */
+    .features-section { background: var(--bg-soft); }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 20px;
+      padding: 28px 24px;
+      position: relative;
+      overflow: hidden;
+      transition: transform .25s, border-color .25s, box-shadow .25s;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-8px);
+      border-color: rgba(255,59,48,.3);
+      box-shadow: 0 20px 48px rgba(255,59,48,.08);
+    }
+
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 40% at 0% 0%, rgba(255,59,48,.04) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .fc-icon {
+      width: 50px; height: 50px;
+      border-radius: 13px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem;
+      margin-bottom: 16px;
+    }
+
+    .fc-icon.red { background: rgba(255,59,48,.14); color: var(--accent); }
+    .fc-icon.orange { background: rgba(255,143,58,.14); color: var(--accent-alt); }
+    .fc-icon.blue { background: rgba(93,169,255,.14); color: var(--blue); }
+    .fc-icon.green { background: rgba(44,208,127,.14); color: var(--green); }
+    .fc-icon.yellow { background: rgba(255,200,87,.14); color: var(--yellow); }
+    .fc-icon.purple { background: rgba(175,122,255,.14); color: #AF7AFF; }
+
+    .feature-card h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; }
+    .feature-card p { font-size: .85rem; color: var(--text-sec); line-height: 1.6; }
+
+    .plan-badge {
+      display: inline-block;
+      font-size: .68rem;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 50px;
+      margin-bottom: 10px;
+      letter-spacing: .4px;
+    }
+
+    .plan-badge.plus { background: rgba(93,169,255,.14); color: var(--blue); border: 1px solid rgba(93,169,255,.25); }
+    .plan-badge.pro { background: rgba(255,143,58,.14); color: var(--accent-alt); border: 1px solid rgba(255,143,58,.25); }
+    .plan-badge.ultra { background: rgba(255,59,48,.14); color: var(--accent); border: 1px solid rgba(255,59,48,.25); }
+
+    /* ─── Showcase ─── */
+    .showcase-section { background: var(--bg); }
+
+    .showcase-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+
+    .showcase-phones {
+      position: relative;
+      height: 500px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .phone {
+      position: absolute;
+      width: 210px;
+      height: 420px;
+      border-radius: 34px;
+      border: 1.5px solid rgba(255,255,255,.12);
+      overflow: hidden;
+      box-shadow: 0 32px 80px rgba(0,0,0,.55);
+    }
+
+    .phone-main { left: 50%; transform: translateX(-50%); z-index: 2; animation: floatY 6s ease-in-out infinite; }
+    .phone-left { left: 0; z-index: 1; transform: translateX(-5%) rotate(-8deg); animation: floatY 6s ease-in-out infinite .8s; opacity: .65; }
+    .phone-right { right: 0; z-index: 1; transform: translateX(5%) rotate(8deg); animation: floatY 6s ease-in-out infinite 1.5s; opacity: .65; }
+
+    .phone-screen {
+      width: 100%; height: 100%;
+      background: linear-gradient(160deg, #1C2340 0%, #07090F 100%);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .ps-topbar { padding: 16px 12px 8px; display: flex; align-items: center; justify-content: space-between; }
+    .ps-logo { width: 28px; height: 28px; background: linear-gradient(135deg, var(--accent), var(--accent-alt)); border-radius: 7px; }
+    .ps-avatar { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,.15); }
+
+    .ps-tabs { display: flex; justify-content: space-around; padding: 6px 10px; }
+    .ps-tab { width: 32px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.1); }
+    .ps-tab.a { background: var(--accent); }
+
+    .ps-hero { margin: 4px 10px 0; height: 130px; border-radius: 12px; background: linear-gradient(135deg, rgba(255,59,48,.15), rgba(30,14,47,.8)); position: relative; overflow: hidden; }
+    .ps-hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.7) 0%, transparent 55%); }
+    .ps-hero-bars { position: absolute; bottom: 10px; left: 10px; right: 10px; z-index: 2; }
+    .ps-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.15); margin-bottom: 4px; }
+    .ps-bar.w70 { width: 70%; }
+    .ps-bar.w45 { width: 45%; }
+
+    .ps-list { padding: 10px 10px 0; display: flex; flex-direction: column; gap: 7px; }
+    .ps-item { height: 52px; border-radius: 9px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.07); display: flex; align-items: center; padding: 0 8px; gap: 8px; }
+    .ps-thumb { width: 36px; height: 40px; border-radius: 5px; background: linear-gradient(135deg, rgba(255,59,48,.18), rgba(255,143,58,.08)); flex-shrink: 0; }
+    .ps-lines { flex: 1; }
+    .ps-line { height: 4px; border-radius: 3px; background: rgba(255,255,255,.1); margin-bottom: 4px; }
+    .ps-line.w6 { width: 60%; }
+
+    .ps-bar-bottom { position: absolute; bottom: 0; left: 0; right: 0; height: 46px; background: rgba(7,9,15,.88); backdrop-filter: blur(10px); border-top: 1px solid rgba(255,255,255,.07); display: flex; align-items: center; justify-content: space-around; }
+    .ps-icon { width: 18px; height: 18px; border-radius: 4px; background: rgba(255,255,255,.1); }
+    .ps-icon.a { background: var(--accent); }
+
+    .showcase-text ul { list-style: none; margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
+    .showcase-text ul li { display: flex; align-items: flex-start; gap: 10px; font-size: .92rem; color: var(--text-sec); }
+    .showcase-text ul li i { color: var(--accent); font-size: .9rem; margin-top: 3px; flex-shrink: 0; }
+
+    /* ─── Plans ─── */
+    .plans-section { background: var(--bg-soft); }
+
+    .plans-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+
+    .plan-card {
+      border-radius: 22px;
+      padding: 28px 22px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.05);
+      position: relative;
+      overflow: hidden;
+      transition: transform .25s, box-shadow .25s;
+    }
+
+    .plan-card:hover { transform: translateY(-6px); }
+
+    .plan-card.hl {
+      border-color: rgba(255,143,58,.45);
+      background: rgba(255,143,58,.06);
+      box-shadow: 0 0 40px rgba(255,143,58,.1);
+      transform: scale(1.03);
+    }
+
+    .plan-card.hl:hover { transform: scale(1.03) translateY(-5px); }
+
+    .plan-popular {
+      position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      background: linear-gradient(90deg, var(--accent), var(--accent-alt));
+      color: #fff; font-size: .68rem; font-weight: 700;
+      padding: 4px 18px; border-radius: 0 0 12px 12px;
+      text-transform: uppercase; letter-spacing: .6px;
+    }
+
+    .plan-dot { width: 9px; height: 9px; border-radius: 50%; margin-bottom: 8px; }
+
+    .plan-name { font-size: 1.35rem; font-weight: 800; margin-bottom: 3px; }
+    .plan-tagline { font-size: .78rem; color: var(--text-muted); margin-bottom: 18px; }
+    .plan-price { font-size: 2rem; font-weight: 900; line-height: 1; letter-spacing: -1px; }
+    .plan-price-note { font-size: .75rem; color: var(--text-muted); margin: 4px 0 20px; }
+    .plan-divider { height: 1px; background: rgba(255,255,255,.08); margin: 16px 0; }
+
+    .plan-features-list { list-style: none; display: flex; flex-direction: column; gap: 9px; margin-bottom: 22px; }
+    .plan-features-list li { display: flex; align-items: center; gap: 9px; font-size: .82rem; color: var(--text-sec); }
+    .plan-features-list li i { font-size: .8rem; flex-shrink: 0; }
+    .plan-features-list li.y i { color: var(--green); }
+    .plan-features-list li.n { opacity: .38; }
+    .plan-features-list li.n i { color: var(--text-muted); }
+
+    .plan-btn {
+      display: block; text-align: center; text-decoration: none;
+      padding: 12px; border-radius: 50px; font-weight: 700; font-size: .87rem;
+      transition: opacity .2s, transform .2s; cursor: pointer; border: none; width: 100%;
+    }
+
+    .plan-btn:hover { opacity: .87; transform: translateY(-2px); }
+    .plan-btn-accent { background: linear-gradient(135deg, var(--accent), var(--accent-alt)); color: #fff; }
+    .plan-btn-outline { background: transparent; border: 1px solid rgba(255,255,255,.14); color: var(--text); }
+    .plan-btn-green { background: linear-gradient(135deg, #2CD07F, #1aa560); color: #fff; }
+
+    /* ─── Compare ─── */
+    .compare-section { background: var(--bg); }
+
+    .compare-wrap { overflow-x: auto; }
+
+    .compare-table {
+      width: 100%; border-collapse: collapse; min-width: 620px;
+    }
+
+    .compare-table th {
+      padding: 12px 14px; font-size: .75rem; font-weight: 700;
+      text-align: center; color: var(--text-muted); text-transform: uppercase;
+      letter-spacing: .6px; background: rgba(255,255,255,.03);
+      border-bottom: 1px solid rgba(255,255,255,.08);
+    }
+
+    .compare-table th:first-child { text-align: left; }
+    .compare-table th.hl { color: var(--accent-alt); }
+
+    .compare-table td {
+      padding: 11px 14px; font-size: .85rem; color: var(--text-sec);
+      text-align: center; border-bottom: 1px solid rgba(255,255,255,.04);
+    }
+
+    .compare-table td:first-child { text-align: left; color: var(--text); font-weight: 500; }
+    .compare-table tr:hover td { background: rgba(255,255,255,.02); }
+    .compare-table .ck { color: var(--green); font-size: .95rem; }
+    .compare-table .cx { color: var(--text-muted); opacity: .35; }
+
+    /* ─── Benefits ─── */
+    .benefits-section { background: var(--bg-soft); }
+
+    .benefits-wrap {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: start;
+    }
+
+    .benefit-group h3 {
+      font-size: 1.2rem; font-weight: 700; margin-bottom: 20px;
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    .benefit-group h3 i { color: var(--accent); }
+
+    .benefit-list { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+
+    .benefit-list li { display: flex; align-items: flex-start; gap: 12px; font-size: .9rem; color: var(--text-sec); line-height: 1.5; }
+
+    .bl-icon {
+      width: 28px; height: 28px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .78rem; flex-shrink: 0; margin-top: 1px;
+    }
+
+    .bl-red { background: rgba(255,59,48,.14); color: var(--accent); }
+    .bl-green { background: rgba(44,208,127,.14); color: var(--green); }
+
+    /* ─── CTA Band ─── */
+    .cta-band {
+      padding: 80px 6%;
+      background: linear-gradient(135deg, #1E0E2F 0%, #0D1A38 60%, var(--bg) 100%);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cta-band::before {
+      content: '';
+      position: absolute;
+      width: 560px; height: 560px;
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      background: radial-gradient(circle, rgba(255,59,48,.1) 0%, transparent 65%);
+      pointer-events: none;
+    }
+
+    .cta-band-inner { position: relative; z-index: 1; max-width: 620px; margin: 0 auto; }
+
+    .cta-band h2 {
+      font-size: clamp(1.7rem, 4vw, 2.6rem);
+      font-weight: 900; letter-spacing: -1px; margin-bottom: 14px;
+    }
+
+    .cta-band p { color: var(--text-sec); font-size: 1rem; margin-bottom: 32px; }
+    .cta-band-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+    /* ─── Testimonials ─── */
+    .reviews-section { background: var(--bg); }
+
+    .testimonials-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .tc {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 18px;
+      padding: 24px 20px;
+    }
+
+    .tc-stars { color: var(--yellow); font-size: .85rem; margin-bottom: 12px; }
+    .tc-text { font-size: .87rem; color: var(--text-sec); line-height: 1.6; margin-bottom: 16px; font-style: italic; }
+    .tc-author { display: flex; align-items: center; gap: 12px; }
+    .tc-av { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .9rem; color: #fff; }
+    .tc-name { font-weight: 600; font-size: .87rem; }
+    .tc-sub { font-size: .75rem; color: var(--text-muted); }
+
+    /* ─── Developer ─── */
+    .dev-section { background: var(--bg-soft); text-align: center; }
+
+    .dev-card {
+      max-width: 660px; margin: 0 auto;
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 24px;
+      padding: 44px 36px;
+    }
+
+    .dev-avatar {
+      width: 76px; height: 76px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.9rem; margin: 0 auto 18px;
+    }
+
+    .dev-card h3 { font-size: 1.4rem; font-weight: 800; margin-bottom: 8px; }
+    .dev-card p { color: var(--text-sec); font-size: .92rem; max-width: 460px; margin: 0 auto 22px; }
+
+    /* ─── Footer ─── */
+    footer {
+      background: var(--bg);
+      border-top: 1px solid rgba(255,255,255,.08);
+      padding: 56px 6% 28px;
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 36px;
+      margin-bottom: 36px;
+    }
+
+    .footer-col h4 {
+      font-size: .82rem; font-weight: 700; color: var(--text);
+      margin-bottom: 14px; text-transform: uppercase; letter-spacing: .6px;
+    }
+
+    .footer-col p { font-size: .82rem; color: var(--text-sec); line-height: 1.7; margin-bottom: 18px; }
+    .footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+    .footer-col ul li a { color: var(--text-sec); text-decoration: none; font-size: .82rem; transition: color .2s; }
+    .footer-col ul li a:hover { color: var(--text); }
+
+    .social-row { display: flex; gap: 10px; }
+
+    .social-link {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-sec); text-decoration: none; font-size: .82rem;
+      transition: background .2s, color .2s, transform .2s;
+    }
+
+    .social-link:hover { background: var(--accent); color: #fff; transform: translateY(-2px); }
+
+    .footer-bottom {
+      padding-top: 24px;
+      border-top: 1px solid rgba(255,255,255,.05);
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 12px;
+    }
+
+    .footer-bottom p { font-size: .78rem; color: var(--text-muted); }
+    .footer-bottom a { color: var(--text-muted); text-decoration: none; font-size: .78rem; transition: color .2s; }
+    .footer-bottom a:hover { color: var(--text); }
+
+    /* ─── Animations ─── */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(26px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes floatY {
+      0%, 100% { transform: var(--base-t, translateX(-50%)); }
+      50%       { transform: var(--float-t, translateX(-50%) translateY(-18px)); }
+    }
+
+    .phone-left  { --base-t: translateX(-5%) rotate(-8deg); --float-t: translateX(-5%) rotate(-8deg) translateY(-14px); }
+    .phone-right { --base-t: translateX(5%) rotate(8deg);  --float-t: translateX(5%) rotate(8deg) translateY(-14px); }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(22px);
+      transition: opacity .7s ease, transform .7s ease;
+    }
+
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 1024px) {
+      .footer-grid { grid-template-columns: 1fr 1fr; }
+      .showcase-inner { grid-template-columns: 1fr; gap: 36px; }
+      .showcase-phones { height: 360px; }
+    }
+
+    @media (max-width: 768px) {
+      nav { display: none; }
+      nav.open {
+        display: flex; flex-direction: column;
+        position: fixed; inset: 0; top: 62px;
+        background: rgba(7,9,15,.97); padding: 28px 6%;
+        gap: 24px; align-items: flex-start; z-index: 999;
+      }
+      nav.open a { font-size: 1.15rem; }
+      .hamburger { display: flex; }
+      .plans-grid { grid-template-columns: 1fr; }
+      .plan-card.hl { transform: none; }
+      .benefits-wrap { grid-template-columns: 1fr; gap: 32px; }
+      .footer-grid { grid-template-columns: 1fr; }
+      .footer-bottom { flex-direction: column; text-align: center; }
+      section { padding: 64px 5%; }
+      .hero-stats { gap: 22px; }
+    }
+
+    @media (max-width: 480px) {
+      .hero h1 { font-size: 1.95rem; }
+      .phone-left, .phone-right { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header id="hdr">
+  <a href="#hero" class="logo">
+    <div class="logo-icon"><i class="fas fa-satellite-dish"></i></div>
+    <span class="logo-name">AS IPTV Player</span>
+  </a>
+
+  <nav id="nav">
+    <a href="#free">Grátis</a>
+    <a href="#features">Recursos</a>
+    <a href="#plans">Planos</a>
+    <a href="#compare">Comparar</a>
+    <a href="#dev">Dev</a>
+    <a href="#plans" class="nav-cta">Começar Agora</a>
+  </nav>
+
+  <button class="hamburger" id="hbg" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
+</header>
+
+<!-- HERO -->
+<section class="hero" id="hero">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <div class="hero-content">
+    <div class="hero-badge"><i class="fas fa-bolt"></i> Streaming Inteligente · 2026</div>
+
+    <h1>
+      O player de streaming<br />
+      que <span class="grad">aprende com você</span>
+    </h1>
+
+    <p class="hero-sub">
+      Filmes, séries e TV ao vivo com algoritmo de recomendação inteligente,
+      player premium e design cinematográfico direto no seu celular.
+    </p>
+
+    <div class="hero-actions">
+      <a href="https://play.google.com/store/apps/details?id=com.adrianosena.asiptv" class="btn btn-accent" target="_blank" rel="noopener">
+        <i class="fab fa-google-play"></i> Baixar na Play Store
+      </a>
+      <a href="#features" class="btn btn-glass">
+        <i class="fas fa-play"></i> Ver recursos
+      </a>
+    </div>
+
+    <div class="hero-stats">
+      <div class="stat"><div class="stat-num">5</div><div class="stat-label">Planos disponíveis</div></div>
+      <div class="stat"><div class="stat-num">4K</div><div class="stat-label">Suporte Ultra HD</div></div>
+      <div class="stat"><div class="stat-num">100%</div><div class="stat-label">Catálogo local seguro</div></div>
+      <div class="stat"><div class="stat-num">∞</div><div class="stat-label">Horas de conteúdo</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FREE FEATURES -->
+<section class="free-section" id="free">
+  <div class="section-header center reveal">
+    <div class="section-tag"><i class="fas fa-gift"></i> Plano Gratuito</div>
+    <h2 class="section-title">O que você usa <span class="hi">de graça</span></h2>
+    <p class="section-sub">Crie sua conta, adicione seu servidor Xtream e comece a assistir agora. Sem cartão de crédito.</p>
+  </div>
+
+  <div class="free-grid">
+    <div class="free-card reveal">
+      <div class="free-pill">Grátis</div>
+      <div class="free-card-icon"><i class="fas fa-server"></i></div>
+      <h3>Adicionar servidor Xtream</h3>
+      <p>Conecte seu provedor via credenciais Xtream Codes. O catálogo é sincronizado e salvo localmente, sem depender de internet o tempo todo.</p>
+    </div>
+    <div class="free-card reveal">
+      <div class="free-pill">Grátis</div>
+      <div class="free-card-icon"><i class="fas fa-film"></i></div>
+      <h3>Player de filmes e séries</h3>
+      <p>Assista filmes e séries com player nativo otimizado — controles de gesto, brilho, seek avançado e tela sempre acesa durante a reprodução.</p>
+    </div>
+    <div class="free-card reveal">
+      <div class="free-pill">Grátis</div>
+      <div class="free-card-icon"><i class="fas fa-broadcast-tower"></i></div>
+      <h3>TV ao vivo</h3>
+      <p>Acesse todos os canais ao vivo do seu servidor com player de baixa latência e fallback automático de formato para máxima compatibilidade.</p>
+    </div>
+    <div class="free-card reveal">
+      <div class="free-pill">Grátis</div>
+      <div class="free-card-icon"><i class="fas fa-search"></i></div>
+      <h3>Busca e categorias</h3>
+      <p>Explore o catálogo completo por categoria, gênero ou nome. Navegação rápida e intuitiva para encontrar o que quer assistir.</p>
+    </div>
+    <div class="free-card reveal">
+      <div class="free-pill">Grátis</div>
+      <div class="free-card-icon"><i class="fas fa-history"></i></div>
+      <h3>Continuar assistindo</h3>
+      <p>O app salva sua posição automaticamente. Retome filmes e séries exatamente de onde parou, mesmo dias depois.</p>
+    </div>
+    <div class="free-card reveal">
+      <div class="free-pill">Grátis</div>
+      <div class="free-card-icon"><i class="fas fa-database"></i></div>
+      <h3>Catálogo local offline</h3>
+      <p>Após a primeira sincronização o catálogo fica no seu dispositivo. Navegue e descubra conteúdos mesmo sem conexão.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ALL FEATURES -->
+<section class="features-section" id="features">
+  <div class="section-header center reveal">
+    <div class="section-tag"><i class="fas fa-star"></i> Funcionalidades</div>
+    <h2 class="section-title">Tudo que o app <span class="hi">oferece</span></h2>
+    <p class="section-sub">Cada recurso foi pensado para elevar sua experiência de streaming ao próximo nível.</p>
+  </div>
+
+  <div class="features-grid">
+    <div class="feature-card reveal">
+      <span class="plan-badge plus">Plus+</span>
+      <div class="fc-icon blue"><i class="fas fa-download"></i></div>
+      <h3>Downloads Offline</h3>
+      <p>Baixe episódios e filmes para assistir sem internet. Perfeito para viagens, metrô ou locais com conexão limitada.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge plus">Plus+</span>
+      <div class="fc-icon red"><i class="fas fa-compress-alt"></i></div>
+      <h3>Mini Player (PiP)</h3>
+      <p>Continue assistindo em janela flutuante enquanto usa outros apps. Saia sem pausar o vídeo e volte quando quiser.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge plus">Plus+</span>
+      <div class="fc-icon orange"><i class="fas fa-tv"></i></div>
+      <h3>Cast para TV (Google Cast)</h3>
+      <p>Espelhe qualquer conteúdo na Smart TV, Chromecast ou dispositivos compatíveis. Um toque e o filme está na telona.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge plus">Plus+</span>
+      <div class="fc-icon green"><i class="fas fa-list-ul"></i></div>
+      <h3>Minhas Listas</h3>
+      <p>Crie listas personalizadas e organize seus filmes e séries favoritos de forma simples e intuitiva.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge pro">Pro</span>
+      <div class="fc-icon blue"><i class="fab fa-apple"></i></div>
+      <h3>AirPlay (iOS)</h3>
+      <p>Transmita para Apple TV, Mac ou qualquer dispositivo AirPlay com qualidade de imagem total.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge pro">Pro</span>
+      <div class="fc-icon purple"><i class="fas fa-brain"></i></div>
+      <h3>Algoritmo Inteligente</h3>
+      <p>IA local que analisa seu histórico, aprende seus gostos e recomenda conteúdos que você vai realmente curtir — sem sair do dispositivo.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge pro">Pro</span>
+      <div class="fc-icon orange"><i class="fas fa-info-circle"></i></div>
+      <h3>Detalhes TMDB</h3>
+      <p>Fichas completas dos filmes e séries: elenco, nota de avaliação, sinopse, gêneros e muito mais integrados à navegação.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge pro">Pro</span>
+      <div class="fc-icon green"><i class="fas fa-server"></i></div>
+      <h3>Múltiplos Servidores</h3>
+      <p>Adicione e alterne entre diferentes servidores IPTV. Ideal para quem tem mais de um provedor de conteúdo.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge pro">Pro</span>
+      <div class="fc-icon blue"><i class="fas fa-users"></i></div>
+      <h3>Múltiplos Perfis</h3>
+      <p>Perfis separados para cada membro da família com histórico, listas e recomendações independentes.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge ultra">Ultra</span>
+      <div class="fc-icon red"><i class="fas fa-shield-alt"></i></div>
+      <h3>Controle Parental</h3>
+      <p>Bloqueie conteúdos por PIN. Restrinja categorias e canais específicos para proteger crianças sem complicação.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge ultra">Ultra</span>
+      <div class="fc-icon orange"><i class="fas fa-eye"></i></div>
+      <h3>Monitor Parental em Tempo Real</h3>
+      <p>Acompanhe o que seus filhos estão assistindo agora mesmo. Bloqueie remotamente qualquer conteúdo ao instante.</p>
+    </div>
+    <div class="feature-card reveal">
+      <span class="plan-badge ultra">Ultra</span>
+      <div class="fc-icon yellow"><i class="fas fa-photo-video"></i></div>
+      <h3>Conteúdo 4K Ultra HD</h3>
+      <p>Suporte completo a streams 4K para quem exige o máximo de qualidade de imagem e tem conexão para isso.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SHOWCASE -->
+<section class="showcase-section" id="showcase">
+  <div class="showcase-inner">
+    <div class="showcase-phones reveal">
+      <!-- Phone Left -->
+      <div class="phone phone-left">
+        <div class="phone-screen">
+          <div class="ps-topbar"><div class="ps-logo"></div><div class="ps-avatar"></div></div>
+          <div class="ps-hero">
+            <div class="ps-hero-bars"><div class="ps-bar w70"></div><div class="ps-bar w45"></div></div>
+          </div>
+          <div class="ps-list">
+            <div class="ps-item"><div class="ps-thumb"></div><div class="ps-lines"><div class="ps-line"></div><div class="ps-line w6"></div></div></div>
+            <div class="ps-item"><div class="ps-thumb"></div><div class="ps-lines"><div class="ps-line"></div><div class="ps-line w6"></div></div></div>
+          </div>
+          <div class="ps-bar-bottom"><div class="ps-icon a"></div><div class="ps-icon"></div><div class="ps-icon"></div><div class="ps-icon"></div></div>
+        </div>
+      </div>
+
+      <!-- Phone Main -->
+      <div class="phone phone-main">
+        <div class="phone-screen">
+          <div class="ps-topbar"><div class="ps-logo"></div><div class="ps-avatar"></div></div>
+          <div class="ps-tabs"><div class="ps-tab a"></div><div class="ps-tab"></div><div class="ps-tab"></div><div class="ps-tab"></div></div>
+          <div class="ps-hero" style="height:150px">
+            <div class="ps-hero-bars"><div class="ps-bar w70"></div><div class="ps-bar w45"></div></div>
+          </div>
+          <div class="ps-list">
+            <div class="ps-item"><div class="ps-thumb"></div><div class="ps-lines"><div class="ps-line"></div><div class="ps-line w6"></div></div></div>
+            <div class="ps-item"><div class="ps-thumb"></div><div class="ps-lines"><div class="ps-line"></div><div class="ps-line w6"></div></div></div>
+            <div class="ps-item"><div class="ps-thumb"></div><div class="ps-lines"><div class="ps-line"></div><div class="ps-line w6"></div></div></div>
+          </div>
+          <div class="ps-bar-bottom"><div class="ps-icon a"></div><div class="ps-icon"></div><div class="ps-icon"></div><div class="ps-icon"></div></div>
+        </div>
+      </div>
+
+      <!-- Phone Right -->
+      <div class="phone phone-right">
+        <div class="phone-screen">
+          <div class="ps-topbar"><div class="ps-logo"></div><div class="ps-avatar"></div></div>
+          <div class="ps-hero">
+            <div class="ps-hero-bars"><div class="ps-bar w70"></div><div class="ps-bar w45"></div></div>
+          </div>
+          <div class="ps-list">
+            <div class="ps-item"><div class="ps-thumb"></div><div class="ps-lines"><div class="ps-line"></div><div class="ps-line w6"></div></div></div>
+            <div class="ps-item"><div class="ps-thumb"></div><div class="ps-lines"><div class="ps-line"></div><div class="ps-line w6"></div></div></div>
+          </div>
+          <div class="ps-bar-bottom"><div class="ps-icon"></div><div class="ps-icon a"></div><div class="ps-icon"></div><div class="ps-icon"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="showcase-text reveal">
+      <div class="section-tag"><i class="fas fa-mobile-alt"></i> Interface Premium</div>
+      <h2 class="section-title">Design que parece <span class="hi">vivo</span></h2>
+      <p style="color:var(--text-sec);font-size:.94rem;margin-top:12px;line-height:1.65;">
+        Inspirado no liquid glass — superfícies translúcidas, blur cinematográfico e
+        animações fluidas que tornam cada interação uma experiência visual única.
+      </p>
+      <ul>
+        <li><i class="fas fa-check-circle"></i> Fundo com blur e orbs decorativas animadas</li>
+        <li><i class="fas fa-check-circle"></i> Cards com glassmorphism e bordas sutis</li>
+        <li><i class="fas fa-check-circle"></i> Player com gestos para volume (sistema) e brilho</li>
+        <li><i class="fas fa-check-circle"></i> Tab bar flutuante com efeito translúcido</li>
+        <li><i class="fas fa-check-circle"></i> Transições suaves entre todas as telas</li>
+        <li><i class="fas fa-check-circle"></i> Tela sempre acesa durante reprodução</li>
+        <li><i class="fas fa-check-circle"></i> Compatível com telas OLED e modo escuro</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- PLANS -->
+<section class="plans-section" id="plans">
+  <div class="section-header center reveal">
+    <div class="section-tag"><i class="fas fa-crown"></i> Planos</div>
+    <h2 class="section-title">Escolha seu <span class="hi">plano ideal</span></h2>
+    <p class="section-sub">Comece de graça ou desbloqueie a experiência completa. Cancele quando quiser.</p>
+  </div>
+
+  <div class="plans-grid">
+    <!-- Start -->
+    <div class="plan-card reveal">
+      <div class="plan-dot" style="background:#7F89A8"></div>
+      <div class="plan-name" style="color:#A8B2D1">Start</div>
+      <div class="plan-tagline">Comece gratuitamente</div>
+      <div class="plan-price" style="color:#A8B2D1">R$&nbsp;0</div>
+      <div class="plan-price-note">Grátis · 1 servidor · 1 perfil</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features-list">
+        <li class="y"><i class="fas fa-check"></i> Player filmes, séries e TV ao vivo</li>
+        <li class="y"><i class="fas fa-check"></i> Catálogo local offline</li>
+        <li class="y"><i class="fas fa-check"></i> Busca e categorias</li>
+        <li class="y"><i class="fas fa-check"></i> Continuar assistindo</li>
+        <li class="n"><i class="fas fa-times"></i> Downloads offline</li>
+        <li class="n"><i class="fas fa-times"></i> Mini Player (PiP)</li>
+        <li class="n"><i class="fas fa-times"></i> Cast para TV</li>
+        <li class="n"><i class="fas fa-times"></i> Algoritmo inteligente</li>
+      </ul>
+      <a href="https://play.google.com/store/apps/details?id=com.adrianosena.asiptv" class="plan-btn plan-btn-outline" target="_blank" rel="noopener">Baixar Grátis</a>
+    </div>
+
+    <!-- Plus -->
+    <div class="plan-card reveal">
+      <div class="plan-dot" style="background:var(--blue)"></div>
+      <div class="plan-name" style="color:var(--blue)">Plus</div>
+      <div class="plan-tagline">Mais liberdade no uso diário</div>
+      <div class="plan-price" style="color:var(--blue)">R$&nbsp;9,90</div>
+      <div class="plan-price-note">por mês · 1 servidor · 1 perfil</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features-list">
+        <li class="y"><i class="fas fa-check"></i> Tudo do Start</li>
+        <li class="y"><i class="fas fa-check"></i> Downloads offline</li>
+        <li class="y"><i class="fas fa-check"></i> Minhas listas</li>
+        <li class="y"><i class="fas fa-check"></i> Mini Player (PiP)</li>
+        <li class="y"><i class="fas fa-check"></i> Cast para TV (Google Cast)</li>
+        <li class="y"><i class="fas fa-check"></i> Aba Explorar</li>
+        <li class="n"><i class="fas fa-times"></i> Algoritmo inteligente</li>
+        <li class="n"><i class="fas fa-times"></i> Controle parental</li>
+      </ul>
+      <a href="#" class="plan-btn" style="background:rgba(93,169,255,.14);color:var(--blue);border:1px solid rgba(93,169,255,.28);">Assinar Plus</a>
+    </div>
+
+    <!-- Pro -->
+    <div class="plan-card hl reveal">
+      <div class="plan-popular">Mais Escolhido</div>
+      <div class="plan-dot" style="background:var(--accent-alt);margin-top:22px"></div>
+      <div class="plan-name" style="color:var(--accent-alt)">Pro</div>
+      <div class="plan-tagline">Mais controle e melhor experiência</div>
+      <div class="plan-price" style="color:var(--accent-alt)">R$&nbsp;19,90</div>
+      <div class="plan-price-note">por mês · 2 servidores · 2 perfis</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features-list">
+        <li class="y"><i class="fas fa-check"></i> Tudo do Plus</li>
+        <li class="y"><i class="fas fa-check"></i> AirPlay (iOS)</li>
+        <li class="y"><i class="fas fa-check"></i> Algoritmo inteligente</li>
+        <li class="y"><i class="fas fa-check"></i> Detalhes TMDB completos</li>
+        <li class="y"><i class="fas fa-check"></i> 2 servidores IPTV</li>
+        <li class="y"><i class="fas fa-check"></i> 2 perfis de usuário</li>
+        <li class="n"><i class="fas fa-times"></i> Controle parental</li>
+        <li class="n"><i class="fas fa-times"></i> Conteúdo 4K</li>
+      </ul>
+      <a href="#" class="plan-btn plan-btn-accent">Assinar Pro</a>
+    </div>
+
+    <!-- Ultra -->
+    <div class="plan-card reveal">
+      <div class="plan-dot" style="background:var(--accent)"></div>
+      <div class="plan-name" style="color:var(--accent)">Ultra</div>
+      <div class="plan-tagline">Experiência completa sem limites</div>
+      <div class="plan-price" style="color:var(--accent)">R$&nbsp;29,90</div>
+      <div class="plan-price-note">por mês · servidores ilimitados · 6 perfis</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features-list">
+        <li class="y"><i class="fas fa-check"></i> Tudo do Pro</li>
+        <li class="y"><i class="fas fa-check"></i> Controle parental completo</li>
+        <li class="y"><i class="fas fa-check"></i> Monitor parental em tempo real</li>
+        <li class="y"><i class="fas fa-check"></i> Servidores ilimitados</li>
+        <li class="y"><i class="fas fa-check"></i> Até 6 perfis de usuário</li>
+        <li class="y"><i class="fas fa-check"></i> Conteúdo 4K Ultra HD</li>
+        <li class="y"><i class="fas fa-check"></i> Suporte prioritário</li>
+        <li class="y"><i class="fas fa-check"></i> Todos os recursos futuros</li>
+      </ul>
+      <a href="#" class="plan-btn" style="background:rgba(255,59,48,.13);color:var(--accent);border:1px solid rgba(255,59,48,.28);">Assinar Ultra</a>
+    </div>
+
+    <!-- Lifetime -->
+    <div class="plan-card reveal">
+      <div class="plan-dot" style="background:var(--green)"></div>
+      <div class="plan-name" style="color:var(--green)">Lifetime</div>
+      <div class="plan-tagline">Pague uma vez, use para sempre</div>
+      <div class="plan-price" style="color:var(--green)">R$&nbsp;199,90</div>
+      <div class="plan-price-note">Pagamento único · perfis ilimitados</div>
+      <div class="plan-divider"></div>
+      <ul class="plan-features-list">
+        <li class="y"><i class="fas fa-check"></i> Todos os recursos Ultra</li>
+        <li class="y"><i class="fas fa-check"></i> Perfis e servidores ilimitados</li>
+        <li class="y"><i class="fas fa-check"></i> Atualizações vitalícias</li>
+        <li class="y"><i class="fas fa-check"></i> Sem assinatura recorrente</li>
+        <li class="y"><i class="fas fa-check"></i> Economize +R$ 158/ano</li>
+        <li class="y"><i class="fas fa-check"></i> Suporte prioritário vitalício</li>
+        <li class="y"><i class="fas fa-check"></i> Todos os recursos futuros</li>
+        <li class="y"><i class="fas fa-check"></i> Acesso antecipado a novidades</li>
+      </ul>
+      <a href="#" class="plan-btn plan-btn-green">Garantir Lifetime</a>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARE TABLE -->
+<section class="compare-section" id="compare">
+  <div class="section-header center reveal">
+    <div class="section-tag"><i class="fas fa-table"></i> Comparativo</div>
+    <h2 class="section-title">Veja o que cada <span class="hi">plano inclui</span></h2>
+  </div>
+
+  <div class="compare-wrap reveal">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Recurso</th>
+          <th>Start</th>
+          <th>Plus</th>
+          <th class="hl">Pro</th>
+          <th>Ultra</th>
+          <th>Lifetime</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Player filmes, séries e TV ao vivo</td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Catálogo local offline</td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Continuar assistindo</td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Downloads offline</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Minhas listas / favoritos</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Mini Player (PiP)</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Cast para TV (Google Cast)</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>AirPlay (iOS)</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Algoritmo de recomendação</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Detalhes TMDB (elenco, nota)</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Múltiplos perfis</td><td>1</td><td>1</td><td>2</td><td>6</td><td>∞</td></tr>
+        <tr><td>Servidores IPTV</td><td>1</td><td>1</td><td>2</td><td>∞</td><td>∞</td></tr>
+        <tr><td>Controle parental</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Monitor parental em tempo real</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr><td>Conteúdo 4K Ultra HD</td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-times cx"></i></td><td><i class="fas fa-check ck"></i></td><td><i class="fas fa-check ck"></i></td></tr>
+        <tr>
+          <td><strong>Preço</strong></td>
+          <td style="color:var(--green);font-weight:700">Grátis</td>
+          <td>R$&nbsp;9,90/mês</td>
+          <td style="color:var(--accent-alt);font-weight:700">R$&nbsp;19,90/mês</td>
+          <td>R$&nbsp;29,90/mês</td>
+          <td style="color:var(--green);font-weight:700">R$&nbsp;199,90</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- BENEFITS / PURCHASE TRIGGERS -->
+<section class="benefits-section" id="benefits">
+  <div class="section-header center reveal">
+    <div class="section-tag"><i class="fas fa-fire"></i> Por que assinar</div>
+    <h2 class="section-title">Motivos para fazer <span class="hi">upgrade</span></h2>
+  </div>
+
+  <div class="benefits-wrap">
+    <div class="benefit-group reveal">
+      <h3><i class="fas fa-bolt"></i> Você vai querer premium quando…</h3>
+      <ul class="benefit-list">
+        <li>
+          <div class="bl-icon bl-red"><i class="fas fa-plane"></i></div>
+          <span>Precisar assistir numa viagem sem WiFi — <strong>downloads offline</strong> garantem horas de entretenimento sem gastar dados.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-red"><i class="fas fa-mobile-alt"></i></div>
+          <span>Quiser continuar o filme enquanto responde mensagens — o <strong>Mini Player (PiP)</strong> flutua sobre qualquer app.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-red"><i class="fas fa-tv"></i></div>
+          <span>Receber amigos e querer colocar na TV grande — um toque e o <strong>Cast para TV</strong> transmite instantaneamente.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-red"><i class="fas fa-brain"></i></div>
+          <span>Cansar de procurar o que assistir — o <strong>algoritmo inteligente</strong> aprende seus gostos e sugere automaticamente.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-red"><i class="fas fa-child"></i></div>
+          <span>Ter filhos em casa e querer controlar o conteúdo — o <strong>controle parental com monitor em tempo real</strong> bloqueia remotamente.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-red"><i class="fas fa-users"></i></div>
+          <span>Compartilhar o app com a família — <strong>múltiplos perfis</strong> garantem histórico e recomendações próprios para cada um.</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="benefit-group reveal">
+      <h3><i class="fas fa-check-circle"></i> Benefícios comprovados</h3>
+      <ul class="benefit-list">
+        <li>
+          <div class="bl-icon bl-green"><i class="fas fa-lock"></i></div>
+          <span>Catálogo 100% local — suas listas e histórico ficam no dispositivo e nunca saem sem sua autorização.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-green"><i class="fas fa-sync-alt"></i></div>
+          <span>Sincronização automática ao abrir — sempre com o catálogo atualizado do seu servidor Xtream.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-green"><i class="fas fa-star"></i></div>
+          <span>Notas, elenco e sinopses do TMDB integradas na ficha do filme ou série, sem abrir o navegador.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-green"><i class="fas fa-shield-alt"></i></div>
+          <span>Privacidade garantida — nenhum dado de visualização é vendido ou compartilhado para anúncios.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-green"><i class="fas fa-hand-pointer"></i></div>
+          <span>Gestos intuitivos no player: deslize para ajustar volume do sistema e brilho da tela instantaneamente.</span>
+        </li>
+        <li>
+          <div class="bl-icon bl-green"><i class="fas fa-infinity"></i></div>
+          <span>Plano Lifetime: pague R$ 199,90 uma única vez e economize mais de <strong>R$ 158 por ano</strong> vs. Ultra mensal.</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- CTA BAND -->
+<section class="cta-band">
+  <div class="cta-band-inner reveal">
+    <h2>Pronto para elevar seu<br /><span class="grad">streaming ao máximo?</span></h2>
+    <p>Junte-se a quem já descobriu a diferença de um player que realmente entende o que você quer assistir.</p>
+    <div class="cta-band-actions">
+      <a href="https://play.google.com/store/apps/details?id=com.adrianosena.asiptv" class="btn btn-accent" target="_blank" rel="noopener">
+        <i class="fab fa-google-play"></i> Baixar Grátis Agora
+      </a>
+      <a href="#plans" class="btn btn-glass">
+        <i class="fas fa-crown"></i> Ver Planos Premium
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section class="reviews-section" id="reviews">
+  <div class="section-header center reveal">
+    <div class="section-tag"><i class="fas fa-comments"></i> Usuários</div>
+    <h2 class="section-title">O que dizem quem <span class="hi">já usa</span></h2>
+  </div>
+
+  <div class="testimonials-grid">
+    <div class="tc reveal">
+      <div class="tc-stars"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></div>
+      <p class="tc-text">"Finalmente um app que não trava na hora de mudar de canal. O player é muito fluido e o design é incrível. Assino o Pro e não largo mais."</p>
+      <div class="tc-author">
+        <div class="tc-av" style="background:linear-gradient(135deg,var(--accent),var(--accent-alt))">M</div>
+        <div><div class="tc-name">Marcos R.</div><div class="tc-sub">Plano Pro · Android</div></div>
+      </div>
+    </div>
+    <div class="tc reveal">
+      <div class="tc-stars"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></div>
+      <p class="tc-text">"O controle parental do Ultra salvou minha vida. Monitoro o que meus filhos assistem em tempo real e bloqueio na hora. Melhor investimento do ano."</p>
+      <div class="tc-author">
+        <div class="tc-av" style="background:linear-gradient(135deg,var(--blue),var(--green))">C</div>
+        <div><div class="tc-name">Carla F.</div><div class="tc-sub">Plano Ultra · Android</div></div>
+      </div>
+    </div>
+    <div class="tc reveal">
+      <div class="tc-stars"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></div>
+      <p class="tc-text">"Comprei o Lifetime e foi a melhor decisão. Toda atualização já está no meu app automático. Não pago mais nada e tenho tudo desbloqueado."</p>
+      <div class="tc-author">
+        <div class="tc-av" style="background:linear-gradient(135deg,var(--green),#1aa560)">R</div>
+        <div><div class="tc-name">Rafael S.</div><div class="tc-sub">Plano Lifetime · Android</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DEVELOPER -->
+<section class="dev-section" id="dev">
+  <div class="dev-card reveal">
+    <div class="dev-avatar"><i class="fas fa-code"></i></div>
+    <h3>Desenvolvido por Adriano Sena</h3>
+    <p>Desenvolvedor apaixonado por streaming e experiências mobile. O AS IPTV Player é construído com Expo + React Native, com total atenção à performance e ao design.</p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+      <a href="https://adrianosena.dev.br/" target="_blank" rel="noopener" class="btn btn-glass" style="font-size:.85rem;padding:10px 20px;">
+        <i class="fas fa-globe"></i> adrianosena.dev.br
+      </a>
+      <a href="mailto:privacidade@as-iptvplayer.com" class="btn btn-glass" style="font-size:.85rem;padding:10px 20px;">
+        <i class="fas fa-envelope"></i> Contato
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-grid">
+    <div class="footer-col">
+      <a href="#hero" class="logo" style="margin-bottom:12px;display:inline-flex">
+        <div class="logo-icon"><i class="fas fa-satellite-dish"></i></div>
+        <span class="logo-name">AS IPTV Player</span>
+      </a>
+      <p>Player de streaming inteligente para Android. Catálogo local, algoritmo de recomendação e design premium.</p>
+      <div class="social-row">
+        <a href="#" class="social-link" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
+        <a href="#" class="social-link" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+        <a href="#" class="social-link" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
+        <a href="https://adrianosena.dev.br/" class="social-link" aria-label="Site" target="_blank" rel="noopener"><i class="fas fa-globe"></i></a>
+      </div>
+    </div>
+    <div class="footer-col">
+      <h4>App</h4>
+      <ul>
+        <li><a href="#free">Recursos Grátis</a></li>
+        <li><a href="#features">Funcionalidades</a></li>
+        <li><a href="#plans">Planos e Preços</a></li>
+        <li><a href="#compare">Comparativo</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h4>Download</h4>
+      <ul>
+        <li><a href="https://play.google.com/store/apps/details?id=com.adrianosena.asiptv" target="_blank" rel="noopener"><i class="fab fa-google-play" style="margin-right:5px"></i>Play Store</a></li>
+        <li><a href="#"><i class="fas fa-download" style="margin-right:5px"></i>Baixar APK</a></li>
+        <li><a href="#"><i class="fas fa-question-circle" style="margin-right:5px"></i>Central de Ajuda</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h4>Legal</h4>
+      <ul>
+        <li><a href="../privacy.html">Política de Privacidade</a></li>
+        <li><a href="#">Termos de Uso</a></li>
+        <li><a href="mailto:privacidade@as-iptvplayer.com">Contato Legal</a></li>
+        <li><a href="https://adrianosena.dev.br/" target="_blank" rel="noopener">Portfólio Dev</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer-bottom">
+    <p>&copy; 2026 AS IPTV Player · Desenvolvido por Adriano Sena</p>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;justify-content:center">
+      <a href="../privacy.html">Privacidade</a>
+      <a href="#">Termos</a>
+      <a href="https://adrianosena.dev.br/" target="_blank" rel="noopener">Dev</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Hamburger menu
+  const hbg = document.getElementById('hbg');
+  const nav = document.getElementById('nav');
+
+  hbg.addEventListener('click', () => {
+    nav.classList.toggle('open');
+    const s = hbg.querySelectorAll('span');
+    if (nav.classList.contains('open')) {
+      s[0].style.transform = 'rotate(45deg) translateY(7px)';
+      s[1].style.opacity   = '0';
+      s[2].style.transform = 'rotate(-45deg) translateY(-7px)';
+    } else {
+      s.forEach(x => { x.style.transform = ''; x.style.opacity = ''; });
+    }
+  });
+
+  nav.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+    nav.classList.remove('open');
+    hbg.querySelectorAll('span').forEach(s => { s.style.transform = ''; s.style.opacity = ''; });
+  }));
+
+  // Header shrink
+  const hdr = document.getElementById('hdr');
+  window.addEventListener('scroll', () => {
+    hdr.style.padding = window.scrollY > 60 ? '11px 6%' : '16px 6%';
+  }, { passive: true });
+
+  // Reveal on scroll
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+  }, { threshold: 0.10 });
+
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+  // Smooth scroll
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', function(e) {
+      const id = this.getAttribute('href');
+      if (id === '#') return;
+      const el = document.querySelector(id);
+      if (el) { e.preventDefault(); window.scrollTo({ top: el.offsetTop - 70, behavior: 'smooth' }); }
+    });
+  });
+</script>
+</body>
+</html>

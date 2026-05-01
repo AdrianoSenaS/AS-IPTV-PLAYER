@@ -1,976 +1,915 @@
-import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useState } from 'react';
-import {
-    Alert,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
-} from 'react-native';
-import { SafeAreaView, } from 'react-native-safe-area-context';
-
-import * as FileSystem from 'expo-file-system/legacy';
-
 import { useRouter } from 'expo-router';
+import * as FileSystem from 'expo-file-system/legacy';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-// Função da API 
-const api = async (value: string) => {
-    try {
-        let url = await AsyncStorage.getItem('url');
-        const username = await AsyncStorage.getItem('username');
-        const password = await AsyncStorage.getItem('password');
-        const urlApi = `${url}/player_api.php?username=${username}&password=${password}&action=${value}`;
-        console.log('API URL:', urlApi);
-        const result = await (await fetch(urlApi)).json();
-        return result;
-    } catch (e) {
-        console.log("Erro ao buscar dados " + e);
-        throw e;
-    }
+import { AppBackdrop } from '@/components/app-backdrop';
+import { StreamingTheme } from '@/constants/streaming-theme';
+import { resetAccessSessionForLaunch, shouldRequireProfileSelection } from '@/services/access-control';
+import {
+  clearCatalogStaging,
+  commitCatalogStaging,
+  getCatalogLastUpdate,
+  hasLocalCatalogDataQuick,
+  invalidateCatalogCache,
+  stageCatalogCategories,
+  stageCatalogItems,
+  setCatalogLastUpdate,
+  StreamItem,
+} from '../services/catalog-data';
+import { isDemoModeEnabled } from '@/services/demo-mode';
+import { getDbValue } from '@/services/local-db';
+import { hasInternetConnection } from '@/services/network';
+import { loadCatalogRefreshPeriod, shouldRefreshCatalog } from '@/services/update-schedule';
+
+type StepStatus = 'pending' | 'loading' | 'done' | 'error';
+
+type Step = {
+  id: number;
+  action: string;
+  title: string;
+  icon: keyof typeof MaterialIcons.glyphMap;
+  fileName?: string;
 };
 
+const steps: Step[] = [
+  { id: 0, action: 'test', title: 'Teste de conexao', icon: 'wifi-protected-setup' },
+  { id: 1, action: 'get_live_categories', title: 'Categorias ao vivo', icon: 'tv' , fileName: 'iptv_liveCategories.json' },
+  { id: 2, action: 'get_live_streams', title: 'Canais ao vivo', icon: 'live-tv', fileName: 'iptv_liveStreams.json' },
+  { id: 3, action: 'get_vod_categories', title: 'Categorias de filmes', icon: 'category', fileName: 'iptv_vodCategories.json' },
+  { id: 4, action: 'get_vod_streams', title: 'Catalogo de filmes', icon: 'movie', fileName: 'iptv_vodStreams.json' },
+  { id: 5, action: 'get_series_categories', title: 'Categorias de series', icon: 'view-list', fileName: 'iptv_seriesCategories.json' },
+  { id: 6, action: 'get_series', title: 'Catalogo de series', icon: 'smart-display', fileName: 'iptv_series.json' },
+  { id: 7, action: 'get_epg', title: 'Guia EPG', icon: 'schedule', fileName: 'iptv_epg.json' },
+];
+
+type Credentials = {
+  url: string;
+  username: string;
+  password: string;
+};
+
+async function api(action: string, credentials: Credentials) {
+  const endpoint = `${credentials.url}/player_api.php?username=${credentials.username}&password=${credentials.password}&action=${action}`;
+  return (await fetch(endpoint)).json();
+}
+
+async function saveDataStream(fileName: string, data: object) {
+  const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+  await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(data));
+}
+
 export default function LoadingScreen() {
+  const router = useRouter();
+  const [logs, setLogs] = useState<string[]>([]);
+  const [currentStep, setCurrentStep] = useState<number>(0);
+  const [stepStates, setStepStates] = useState<Record<number, StepStatus>>({});
+  const [progress, setProgress] = useState(0);
+  const [loadingDone, setLoadingDone] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const heroPulse = useState(() => new Animated.Value(0))[0];
+  const activeStepPulse = useState(() => new Animated.Value(0))[0];
+  const progressShimmer = useState(() => new Animated.Value(0))[0];
 
-    const router = useRouter();
-    const [connectionStatus, setConnectionStatus] = useState({
-        server: 'Conectando...',
-        progress: 0,
-        status: 'Conectando ao servidor...'
-    });
+  const appendLog = (value: string) => {
+    setLogs((prev) => [...prev, value].slice(-8));
+  };
 
-    const [downloads, setDownloads] = useState({
-        liveCategories: {
-            name: 'Categorias TV Ao Vivo',
-            total: 0,
-            downloaded: 0,
-            progress: 0,
-            status: 'Aguardando...',
-            data: []
-        },
-        liveStreams: {
-            name: 'Canais TV Ao Vivo',
-            total: 0,
-            downloaded: 0,
-            progress: 0,
-            status: 'Aguardando...',
-            data: []
-        },
-        vodCategories: {
-            name: 'Categorias de Filmes',
-            total: 0,
-            downloaded: 0,
-            progress: 0,
-            status: 'Aguardando...',
-            data: []
-        },
-        vodStreams: {
-            name: 'Filmes (VOD)',
-            total: 0,
-            downloaded: 0,
-            progress: 0,
-            status: 'Aguardando...',
-            data: []
-        },
-        seriesCategories: {
-            name: 'Categorias de Séries',
-            total: 0,
-            downloaded: 0,
-            progress: 0,
-            status: 'Aguardando...',
-            data: []
-        },
-        series: {
-            name: 'Séries',
-            total: 0,
-            downloaded: 0,
-            progress: 0,
-            status: 'Aguardando...',
-            data: []
-        },
-        epg: {
-            name: 'Guia de Programação',
-            total: 0,
-            downloaded: 0,
-            progress: 0,
-            status: 'Aguardando...',
-            data: []
+  const markStep = (stepId: number, status: StepStatus) => {
+    setStepStates((prev) => ({ ...prev, [stepId]: status }));
+  };
+
+  const runLoad = async () => {
+    try {
+      setFailure(null);
+
+      const [lastUpdate, period, hasLocalData] = await Promise.all([
+        getCatalogLastUpdate(),
+        loadCatalogRefreshPeriod(),
+        hasLocalCatalogDataQuick(),
+      ]);
+
+      const shouldRefreshNow = shouldRefreshCatalog(lastUpdate, period) || !hasLocalData;
+
+      if (!shouldRefreshNow) {
+        appendLog('Catalogo local atualizado. Pulando sincronizacao remota.');
+        setProgress(100);
+        setLoadingDone(true);
+        await resetAccessSessionForLaunch();
+        const requireProfileSelection = await shouldRequireProfileSelection();
+        setTimeout(() => {
+          router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+        }, 120);
+        return;
+      }
+
+      const hasInternet = await hasInternetConnection();
+      if (!hasInternet) {
+        if (hasLocalData) {
+          appendLog('Sem internet. Usando catalogo local salvo.');
+          setProgress(100);
+          setLoadingDone(true);
+          await resetAccessSessionForLaunch();
+          const requireProfileSelection = await shouldRequireProfileSelection();
+          setTimeout(() => {
+            router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+          }, 120);
+          return;
         }
-    });
 
-    const [currentStep, setCurrentStep] = useState(0);
-    const [overallProgress, setOverallProgress] = useState(0);
-    const [logMessages, setLogMessages] = useState([]);
-    const [error, setError] = useState(null);
-    const [retryCount, setRetryCount] = useState(0);
+        appendLog('Sem internet. Abrindo modo offline com downloads.');
+        setProgress(100);
+        setLoadingDone(true);
+        setTimeout(() => {
+          router.replace('/offline');
+        }, 120);
+        return;
+      }
 
-    const steps = [
-        { id: 0, name: 'Teste de Conexão', icon: 'wifi', action: 'testConnection' },
-        { id: 1, name: 'Categorias TV', icon: 'format-list-bulleted', action: 'get_live_categories' },
-        { id: 2, name: 'Canais TV', icon: 'live-tv', action: 'get_live_streams' },
-        { id: 3, name: 'Categorias Filmes', icon: 'movie-filter', action: 'get_vod_categories' },
-        { id: 4, name: 'Filmes', icon: 'movie', action: 'get_vod_streams' },
-        { id: 5, name: 'Categorias Séries', icon: 'tv', action: 'get_series_categories' },
-        { id: 6, name: 'Séries', icon: 'theaters', action: 'get_series' },
-        { id: 7, name: 'EPG', icon: 'schedule', action: 'get_epg' }
-    ];
+      if (await isDemoModeEnabled()) {
+        appendLog('Modo demo ativo. Pulando sincronizacao remota...');
+        setProgress(100);
+        setLoadingDone(true);
+        await resetAccessSessionForLaunch();
+        const requireProfileSelection = await shouldRequireProfileSelection();
+        setTimeout(() => {
+          router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+        }, 120);
+        return;
+      }
 
+      appendLog('Iniciando sincronizacao da plataforma...');
 
-    const saveDataStream = async (fileName: string, data: object) => {
+      const [url, username, password] = await Promise.all([
+        getDbValue<string>('url'),
+        getDbValue<string>('username'),
+        getDbValue<string>('password'),
+      ]);
+
+      if (!url || !username || !password) {
+        router.replace('/login');
+        return;
+      }
+
+      const credentials: Credentials = { url, username, password };
+      await clearCatalogStaging();
+
+      for (const step of steps) {
+        setCurrentStep(step.id);
+        markStep(step.id, 'loading');
+
         try {
-            const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-            const dataString = JSON.stringify(data);
-            await FileSystem.writeAsStringAsync(fileUri, dataString);
-            console.log(`Arquivo salvo com sucesso em: ${fileUri}`);
-        } catch (error) {
-            console.error('Erro ao salvar o arquivo:', error);
-        }
-    };
-    
-
-    const addLog = (message, type = 'info') => {
-        const timestamp = new Date().toLocaleTimeString();
-        const logEntry = `[${timestamp}] ${message}`;
-
-        setLogMessages(prev => {
-            const newLogs = [...prev, { message: logEntry, type }];
-            return newLogs.slice(-10);
-        });
-
-        console.log(`[${type.toUpperCase()}] ${message}`);
-    };
-
-    const updateDownloadProgress = (category, progress, status, data = null) => {
-        setDownloads(prev => {
-            const updated = { ...prev };
-            if (data) {
-                updated[category] = {
-                    ...updated[category],
-                    progress,
-                    status,
-                    data,
-                    total: Array.isArray(data) ? data.length : 1,
-                    downloaded: progress === 100 ? (Array.isArray(data) ? data.length : 1) : 0
-                };
-            } else {
-                updated[category] = {
-                    ...updated[category],
-                    progress,
-                    status
-                };
+          if (step.action === 'test') {
+            const testData = await api('get_live_categories', credentials);
+            if (testData?.error) {
+              throw new Error(`${step.title}: ${testData.error}`);
             }
-            return updated;
-        });
-    };
-
-    const calculateOverallProgress = () => {
-        const totalSteps = steps.length;
-        const completedSteps = steps.filter((_, index) => index < currentStep).length;
-        const currentStepProgress = downloads[getDownloadCategory(currentStep)]?.progress || 0;
-
-        const stepWeight = 100 / totalSteps;
-        const progress = (completedSteps * stepWeight) + ((currentStepProgress / 100) * stepWeight);
-
-        return Math.min(progress, 100);
-    };
-
-    const getDownloadCategory = (stepIndex) => {
-        switch (stepIndex) {
-            case 0: return null; 
-            case 1: return 'liveCategories';
-            case 2: return 'liveStreams';
-            case 3: return 'vodCategories';
-            case 4: return 'vodStreams';
-            case 5: return 'seriesCategories';
-            case 6: return 'series';
-            case 7: return 'epg';
-            default: return null;
-        }
-    };
-
-    const testConnection = async () => {
-        try {
-            addLog('Testando conexão com o servidor...');
-            setConnectionStatus({
-                server: 'Conectando...',
-                progress: 25,
-                status: 'Validando credenciais...'
-            });
-
-            // Primeiro, testamos com uma chamada simples
-            const testResult = await api('get_live_categories');
-
-            if (testResult && !testResult.error) {
-                addLog('✅ Conexão estabelecida com sucesso!', 'success');
-                setConnectionStatus({
-                    server: 'Conectado',
-                    progress: 100,
-                    status: 'Servidor pronto'
-                });
-                return true;
-            } else {
-                throw new Error('Resposta inválida do servidor');
-            }
-        } catch (error) {
-            addLog(`❌ Falha na conexão: ${error.message}`, 'error');
-            setConnectionStatus({
-                server: 'Falha',
-                progress: 0,
-                status: 'Erro de conexão'
-            });
-            throw error;
-        }
-    };
-
-    const fetchData = async (action, category) => {
-        try {
-            addLog(`Baixando ${downloads[category].name}...`);
-            updateDownloadProgress(category, 25, 'Baixando...');
-
-            const data = await api(action);
-
-            if (data && !data.error) {
-                updateDownloadProgress(category, 100, 'Concluído', data);
-                addLog(`✅ ${downloads[category].name}: ${Array.isArray(data) ? data.length : 1} itens`, 'success');
-
-                // Salvar no AsyncStorage para uso futuro
-                saveDataStream(`iptv_${category}.json`, data)
-                // await AsyncStorage.setItem(`iptv_${category}`, JSON.stringify(data));
-                   
-                return data;
-            } else {
-                throw new Error(data?.error || 'Dados inválidos');
-            }
-        } catch (error) {
-            updateDownloadProgress(category, 0, 'Falha');
-            addLog(`❌ Erro ao baixar ${downloads[category].name}: ${error.message}`, 'error');
-            throw error;
-        }
-    };
-
-    const processStep = async (stepIndex) => {
-        const step = steps[stepIndex];
-        setCurrentStep(stepIndex);
-
-        switch (step.action) {
-            case 'testConnection':
-                await testConnection();
-                break;
-
-            case 'get_live_categories':
-                await fetchData('get_live_categories', 'liveCategories');
-                break;
-
-            case 'get_live_streams':
-                await fetchData('get_live_streams', 'liveStreams');
-                break;
-
-            case 'get_vod_categories':
-                await fetchData('get_vod_categories', 'vodCategories');
-                break;
-
-            case 'get_vod_streams':
-                await fetchData('get_vod_streams', 'vodStreams');
-                break;
-
-            case 'get_series_categories':
-                await fetchData('get_series_categories', 'seriesCategories');
-                break;
-
-            case 'get_series':
-                await fetchData('get_series', 'series');
-                break;
-
-            case 'get_epg':
-                await fetchData('get_epg', 'epg');
-                break;
-
-            default:
-                addLog(`Ação desconhecida: ${step.action}`, 'warning');
-        }
-    };
-
-    const startLoadingProcess = async () => {
-        try {
-            setError(null);
-            addLog('🚀 Iniciando processo de carregamento do AS IPTV...');
-
-            // Verificar se temos credenciais salvas
-            const url = await AsyncStorage.getItem('url');
-            const username = await AsyncStorage.getItem('username');
-            const password = await AsyncStorage.getItem('password');
-
-            if (!url || !username || !password) {
-                addLog('❌ Credenciais não encontradas. Redirecionando para login...', 'error');
-                setTimeout(() => {
-                    router.replace('/login');
-                }, 2000);
-                return;
+            appendLog('Conexao com servidor validada.');
+          } else {
+            const data = await api(step.action, credentials);
+            if (data?.error) {
+              throw new Error(`${step.title}: ${data.error}`);
             }
 
-            addLog(`Conectando em: ${url}`, 'info');
-            addLog(`Usuário: ${username}`, 'info');
-
-            // Processar cada etapa sequencialmente
-            for (let i = 0; i < steps.length; i++) {
-                await processStep(i);
-
-                // Atualizar progresso geral
-                setOverallProgress(calculateOverallProgress());
+            if (step.fileName) {
+              // Mantemos os arquivos apenas como fallback para debug/manutenção.
+              await saveDataStream(step.fileName, data);
             }
 
-            // Todas as etapas concluídas com sucesso
-            addLog('🎉 Todos os dados foram carregados com sucesso!', 'success');
-            addLog('Preparando interface...', 'info');
+            const list: StreamItem[] = Array.isArray(data) ? (data as StreamItem[]) : [];
+            appendLog(`${step.title}: ${list.length} itens`);
 
-            // Salvar timestamp da última atualização
-            await AsyncStorage.setItem('lastUpdate', new Date().toISOString());
-
-            // Navegar para a tela principal após 2 segundos
-            setTimeout(() => {
-                router.replace('/(tabs)');
-            }, 2000);
-
-        } catch (error) {
-            addLog(`❌ Erro no processo de carregamento: ${error.message}`, 'error');
-            setError(error.message);
+            if (step.action === 'get_live_categories') {
+              appendLog(`Preparando ${list.length} categorias ao vivo para salvar no banco...`);
+              await stageCatalogCategories('live', list);
+            } else if (step.action === 'get_live_streams') {
+              appendLog(`Preparando ${list.length} canais ao vivo para salvar no banco...`);
+              await stageCatalogItems('live', list);
+            } else if (step.action === 'get_vod_categories') {
+              appendLog(`Preparando ${list.length} categorias de filmes para salvar no banco...`);
+              await stageCatalogCategories('vod', list);
+            } else if (step.action === 'get_vod_streams') {
+              appendLog(`Preparando ${list.length} filmes para salvar no banco...`);
+              await stageCatalogItems('vod', list);
+            } else if (step.action === 'get_series_categories') {
+              appendLog(`Preparando ${list.length} categorias de series para salvar no banco...`);
+              await stageCatalogCategories('series', list);
+            } else if (step.action === 'get_series') {
+              appendLog(`Preparando ${list.length} series para salvar no banco...`);
+              await stageCatalogItems('series', list);
+            }
+          }
+        } catch (stepError: any) {
+          if (step.action === 'get_epg') {
+            appendLog('EPG nao carregado. Continuando sem guia.');
+            if (step.fileName) {
+              try {
+                await saveDataStream(step.fileName, []);
+              } catch {
+                // Falha de persistencia local do EPG nao pode bloquear a entrada no app.
+                appendLog('Nao foi possivel salvar fallback do EPG localmente.');
+              }
+            }
+          } else {
+            markStep(step.id, 'error');
+            throw stepError;
+          }
         }
-    };
 
-    const retryConnection = () => {
-        if (retryCount < 3) {
-            addLog(`Tentativa ${retryCount + 1} de 3...`, 'warning');
-            setRetryCount(prev => prev + 1);
-            startLoadingProcess();
-        } else {
-            Alert.alert(
-                'Erro de Conexão',
-                'Não foi possível conectar ao servidor após várias tentativas. Verifique suas credenciais e conexão.',
-                [
-                    {
-                        text: 'Configurar Novamente',
-                        onPress: () => router.replace('/login')
-                    },
-                    {
-                        text: 'Tentar Novamente',
-                        onPress: () => {
-                            setRetryCount(0);
-                            startLoadingProcess();
-                        }
-                    }
-                ]
-            );
-        }
-    };
+        markStep(step.id, 'done');
+        setProgress(Math.round(((step.id + 1) / steps.length) * 100));
+      }
 
-    useEffect(() => {
-        startLoadingProcess();
-    }, []);
+      appendLog('Aplicando catalogo completo no banco local...');
+      await commitCatalogStaging();
+      invalidateCatalogCache();
 
-    useEffect(() => {
-        const progress = calculateOverallProgress();
-        setOverallProgress(progress);
-    }, [currentStep, downloads]);
+      try {
+        const syncAt = new Date().toISOString();
+        await setCatalogLastUpdate(syncAt);
+      } catch {
+        // Falha ao registrar data de sincronizacao nao deve bloquear o acesso.
+        appendLog('Catalogo salvo, mas nao foi possivel registrar a data da sincronizacao.');
+      }
 
-    const getStepIcon = (stepIndex) => {
-        if (stepIndex < currentStep) return 'check-circle';
-        if (stepIndex === currentStep) return 'progress-clock';
-        return 'clock-outline';
-    };
+      appendLog('Tudo pronto. Entrando na sua home...');
+      setLoadingDone(true);
+      await resetAccessSessionForLaunch();
+      const requireProfileSelection = await shouldRequireProfileSelection();
 
-    const getStepColor = (stepIndex) => {
-        if (stepIndex < currentStep) return '#4CAF50';
-        if (stepIndex === currentStep) return '#a70101ff';
-        return '#666';
-    };
+      setTimeout(() => {
+        router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+      }, 180);
+    } catch (error: any) {
+      await clearCatalogStaging().catch(() => {
+        // Mantem o catalogo oficial intacto mesmo se a limpeza temporaria falhar.
+      });
+      const failureMessage = error?.message ?? 'Falha na sincronizacao';
+      setFailure(failureMessage);
+      appendLog(`Falha obrigatoria: ${failureMessage}`);
+    }
+  };
 
-    const getTotalItems = () => {
-        const totals = {
-            live: downloads.liveStreams.total || 0,
-            movies: downloads.vodStreams.total || 0,
-            series: downloads.series.total || 0,
-            epg: downloads.epg.total || 0
-        };
+  useEffect(() => {
+    runLoad();
+  }, []);
 
-        return {
-            ...totals,
-            total: totals.live + totals.movies + totals.series
-        };
-    };
+  useEffect(() => {
+    if (loadingDone || failure) {
+      heroPulse.stopAnimation();
+      activeStepPulse.stopAnimation();
+      progressShimmer.stopAnimation();
+      return;
+    }
 
-    const totals = getTotalItems();
-
-    return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar
-                barStyle="light-content"
-                backgroundColor="#7e1a1aff"
-            />
-
-            <LinearGradient
-                colors={['#7e1a1aff', '#a70101ff', '#812a2aff']}
-                style={styles.header}
-            >
-                <View style={styles.headerContent}>
-                    <MaterialIcons name="live-tv" size={40} color="#fff" />
-                    <View style={styles.headerText}>
-                        <Text style={styles.appName}>AS IPTV</Text>
-                        <Text style={styles.appTagline}>
-                            {error ? 'Erro de Conexão' : 'Sincronizando com o servidor...'}
-                        </Text>
-                    </View>
-                </View>
-            </LinearGradient>
-
-            <ScrollView style={styles.content}>
-                {error ? (
-                    <View style={styles.errorContainer}>
-                        <MaterialIcons name="error-outline" size={60} color="#FF5252" />
-                        <Text style={styles.errorTitle}>Erro de Conexão</Text>
-                        <Text style={styles.errorMessage}>{error}</Text>
-
-                        <TouchableOpacity
-                            style={styles.retryButton}
-                            onPress={retryConnection}
-                        >
-                            <MaterialIcons name="refresh" size={24} color="#fff" />
-                            <Text style={styles.retryButtonText}>
-                                {retryCount < 3 ? 'TENTAR NOVAMENTE' : 'VERIFICAR CREDENCIAIS'}
-                            </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={styles.backButton}
-                            onPress={() => router.replace('/login')}
-                        >
-                            <Text style={styles.backButtonText}>Voltar para Login</Text>
-                        </TouchableOpacity>
-                    </View>
-                ) : (
-                    <>
-                        {/* Status da Conexão */}
-                        <View style={styles.connectionCard}>
-                            <View style={styles.cardHeader}>
-                                <MaterialCommunityIcons
-                                    name={connectionStatus.server === 'Conectado' ? 'server-network' : 'server-off'}
-                                    size={24}
-                                    color={connectionStatus.server === 'Conectado' ? '#4CAF50' : '#FFA000'}
-                                />
-                                <Text style={styles.cardTitle}>Status do Servidor</Text>
-                            </View>
-
-                            <View style={styles.connectionInfo}>
-                                <View style={styles.connectionStatus}>
-                                    <View style={[
-                                        styles.statusDot,
-                                        {
-                                            backgroundColor: connectionStatus.server === 'Conectado' ? '#4CAF50' :
-                                                connectionStatus.server === 'Falha' ? '#FF5252' : '#FFA000'
-                                        }
-                                    ]} />
-                                    <Text style={styles.statusText}>{connectionStatus.status}</Text>
-                                </View>
-
-                                <View style={styles.connectionProgress}>
-                                    <View style={styles.progressBar}>
-                                        <View
-                                            style={[
-                                                styles.progressFill,
-                                                { width: `${connectionStatus.progress}%` }
-                                            ]}
-                                        />
-                                    </View>
-                                    <Text style={styles.progressText}>{connectionStatus.progress}%</Text>
-                                </View>
-                            </View>
-                        </View>
-
-                        {/* Progresso Geral */}
-                        <View style={styles.overallProgressCard}>
-                            <View style={styles.cardHeader}>
-                                <MaterialIcons name="dashboard" size={24} color="#fff" />
-                                <Text style={styles.cardTitle}>Progresso Geral</Text>
-                            </View>
-
-                            <View style={styles.progressContainer}>
-                                <View style={styles.progressBar}>
-                                    <View
-                                        style={[
-                                            styles.progressFill,
-                                            { width: `${overallProgress}%` }
-                                        ]}
-                                    />
-                                </View>
-                                <Text style={styles.progressText}>{Math.round(overallProgress)}%</Text>
-                            </View>
-
-                            <Text style={styles.progressSubtext}>
-                                {currentStep === steps.length - 1 && overallProgress >= 100 ?
-                                    'Sincronização concluída!' :
-                                    `Etapa ${currentStep + 1} de ${steps.length}`}
-                            </Text>
-                        </View>
-
-                        {/* Etapas de Sincronização */}
-                        <View style={styles.stepsCard}>
-                            <View style={styles.cardHeader}>
-                                <MaterialIcons name="sync" size={24} color="#fff" />
-                                <Text style={styles.cardTitle}>Etapas de Sincronização</Text>
-                            </View>
-
-                            {steps.map((step, index) => (
-                                <View key={step.id} style={styles.stepItem}>
-                                    <View style={styles.stepIconContainer}>
-                                        <MaterialCommunityIcons
-                                            name={getStepIcon(index)}
-                                            size={22}
-                                            color={getStepColor(index)}
-                                        />
-                                    </View>
-                                    <Text style={[
-                                        styles.stepText,
-                                        { color: getStepColor(index) }
-                                    ]}>
-                                        {step.name}
-                                    </Text>
-                                    {index < currentStep && (
-                                        <MaterialIcons name="check" size={20} color="#4CAF50" />
-                                    )}
-                                </View>
-                            ))}
-                        </View>
-
-                        {/* Downloads em Progresso */}
-                        <View style={styles.downloadsCard}>
-                            <View style={styles.cardHeader}>
-                                <MaterialIcons name="cloud-download" size={24} color="#fff" />
-                                <Text style={styles.cardTitle}>Downloads em Andamento</Text>
-                            </View>
-
-                            {Object.entries(downloads).map(([key, item]) => (
-                                item.progress > 0 && (
-                                    <View key={key} style={styles.downloadItem}>
-                                        <View style={styles.downloadInfo}>
-                                            <MaterialCommunityIcons
-                                                name={key.includes('live') ? 'satellite-variant' :
-                                                    key.includes('vod') ? 'movie' :
-                                                        key.includes('series') ? 'television' : 'calendar-text'}
-                                                size={18}
-                                                color="#a70101ff"
-                                            />
-                                            <View style={styles.downloadDetails}>
-                                                <Text style={styles.downloadName}>{item.name}</Text>
-                                                <Text style={styles.downloadStatus}>{item.status}</Text>
-                                            </View>
-                                        </View>
-
-                                        <View style={styles.downloadProgress}>
-                                            <View style={styles.downloadBar}>
-                                                <View
-                                                    style={[
-                                                        styles.downloadFill,
-                                                        { width: `${item.progress}%` }
-                                                    ]}
-                                                />
-                                            </View>
-                                            <Text style={styles.downloadStats}>
-                                                {item.total > 0 ? `${item.total} itens` : 'Processando...'}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                )
-                            ))}
-                        </View>
-
-                        {/* Estatísticas */}
-                        <View style={styles.statsCard}>
-                            <View style={styles.cardHeader}>
-                                <MaterialIcons name="insert-chart" size={24} color="#fff" />
-                                <Text style={styles.cardTitle}>Estatísticas</Text>
-                            </View>
-
-                            <View style={styles.statsGrid}>
-                                <View style={styles.statBox}>
-                                    <MaterialIcons name="live-tv" size={28} color="#FF5252" />
-                                    <Text style={styles.statNumber}>{totals.live}</Text>
-                                    <Text style={styles.statLabel}>Canais TV</Text>
-                                </View>
-
-                                <View style={styles.statBox}>
-                                    <MaterialIcons name="movie" size={28} color="#4CAF50" />
-                                    <Text style={styles.statNumber}>{totals.movies}</Text>
-                                    <Text style={styles.statLabel}>Filmes</Text>
-                                </View>
-
-                                <View style={styles.statBox}>
-                                    <MaterialIcons name="tv" size={28} color="#2196F3" />
-                                    <Text style={styles.statNumber}>{totals.series}</Text>
-                                    <Text style={styles.statLabel}>Séries</Text>
-                                </View>
-
-                                <View style={styles.statBox}>
-                                    <MaterialIcons name="schedule" size={28} color="#FF9800" />
-                                    <Text style={styles.statNumber}>{totals.epg}</Text>
-                                    <Text style={styles.statLabel}>EPG</Text>
-                                </View>
-                            </View>
-                        </View>
-
-                        {/* Log do Sistema */}
-                        <View style={styles.logCard}>
-                            <View style={styles.cardHeader}>
-                                <MaterialIcons name="history" size={24} color="#fff" />
-                                <Text style={styles.cardTitle}>Log do Sistema</Text>
-                            </View>
-
-                            <View style={styles.logContent}>
-                                {logMessages.slice().reverse().map((log, index) => (
-                                    <Text
-                                        key={index}
-                                        style={[
-                                            styles.logMessage,
-                                            log.type === 'error' && styles.logError,
-                                            log.type === 'success' && styles.logSuccess,
-                                            log.type === 'warning' && styles.logWarning
-                                        ]}
-                                    >
-                                        {log.message}
-                                    </Text>
-                                ))}
-                            </View>
-                        </View>
-                    </>
-                )}
-            </ScrollView>
-
-            {/* Rodapé */}
-            <View style={styles.footer}>
-                <View style={styles.footerContent}>
-                    <MaterialIcons
-                        name={error ? "error" : "info"}
-                        size={16}
-                        color={error ? "#FF5252" : "#888"}
-                    />
-                    <Text style={[styles.footerText, error && styles.footerError]}>
-                        {error ? 'Erro detectado' : 'Sincronizando com o servidor...'}
-                    </Text>
-                </View>
-                <Text style={styles.version}>Xtream Codes API</Text>
-            </View>
-        </SafeAreaView>
+    const heroLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(heroPulse, {
+          toValue: 1,
+          duration: 1800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(heroPulse, {
+          toValue: 0,
+          duration: 1800,
+          useNativeDriver: true,
+        }),
+      ])
     );
+
+    const stepLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(activeStepPulse, {
+          toValue: 1,
+          duration: 950,
+          useNativeDriver: true,
+        }),
+        Animated.timing(activeStepPulse, {
+          toValue: 0,
+          duration: 950,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    const shimmerLoop = Animated.loop(
+      Animated.timing(progressShimmer, {
+        toValue: 1,
+        duration: 1600,
+        useNativeDriver: true,
+      })
+    );
+
+    heroLoop.start();
+    stepLoop.start();
+    shimmerLoop.start();
+
+    return () => {
+      heroLoop.stop();
+      stepLoop.stop();
+      shimmerLoop.stop();
+      heroPulse.setValue(0);
+      activeStepPulse.setValue(0);
+      progressShimmer.setValue(0);
+    };
+  }, [activeStepPulse, failure, heroPulse, loadingDone, progressShimmer]);
+
+  const doneCount = useMemo(
+    () => Object.values(stepStates).filter((status) => status === 'done').length,
+    [stepStates]
+  );
+
+  const activeStepMeta = useMemo(
+    () => steps.find((step) => step.id === currentStep) ?? steps[0],
+    [currentStep]
+  );
+
+  const recentLogs = useMemo(() => [...logs].reverse(), [logs]);
+
+  const heroAnimatedStyle = useMemo(
+    () => ({
+      transform: [
+        {
+          scale: heroPulse.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 1.015],
+          }),
+        },
+      ],
+      opacity: heroPulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.96, 1],
+      }),
+    }),
+    [heroPulse]
+  );
+
+  const activePulseStyle = useMemo(
+    () => ({
+      transform: [
+        {
+          scale: activeStepPulse.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 1.03],
+          }),
+        },
+      ],
+      opacity: activeStepPulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.92, 1],
+      }),
+    }),
+    [activeStepPulse]
+  );
+
+  const shimmerTranslate = useMemo(
+    () =>
+      progressShimmer.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-220, 220],
+      }),
+    [progressShimmer]
+  );
+
+  const retry = () => {
+    setFailure(null);
+    setStepStates({});
+    setProgress(0);
+    setLoadingDone(false);
+    setLogs([]);
+    runLoad();
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      <AppBackdrop blurIntensity={32} />
+
+      <View style={styles.header}>
+        <View style={styles.kickerRow}>
+          <View style={styles.liveDot} />
+          <Text style={styles.kicker}>Sincronizacao inteligente</Text>
+        </View>
+        <Text style={styles.title}>Preparando seu streaming</Text>
+        <Text style={styles.subtitle}>
+          Sincronizando catalogos, categorias e canais do seu servidor para uma experiencia local mais fluida.
+        </Text>
+      </View>
+
+      <Animated.View style={[styles.heroCard, heroAnimatedStyle]}>
+        <LinearGradient colors={StreamingTheme.gradients.card} style={styles.heroGradient}>
+          <View style={styles.heroTop}>
+            <View style={styles.heroIconWrap}>
+              <MaterialIcons name={activeStepMeta.icon} size={22} color={StreamingTheme.colors.textPrimary} />
+            </View>
+            <View style={styles.heroTextWrap}>
+              <Text style={styles.heroLabel}>Etapa atual</Text>
+              <Text style={styles.heroTitle}>{activeStepMeta.title}</Text>
+            </View>
+            {!loadingDone && !failure ? (
+              <ActivityIndicator size="small" color={StreamingTheme.colors.accentAlt} />
+            ) : null}
+          </View>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statChip}>
+              <Text style={styles.statValue}>{doneCount}</Text>
+              <Text style={styles.statLabel}>etapas prontas</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statChip}>
+              <Text style={styles.statValue}>{steps.length - doneCount}</Text>
+              <Text style={styles.statLabel}>restantes</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statChip}>
+              <Text style={styles.statValue}>{progress}%</Text>
+              <Text style={styles.statLabel}>concluido</Text>
+            </View>
+          </View>
+        </LinearGradient>
+      </Animated.View>
+
+      <View style={styles.noticeCard}>
+        <MaterialIcons name="schedule" size={18} color={StreamingTheme.colors.warning} />
+        <View style={styles.noticeContent}>
+          <Text style={styles.noticeTitle}>Tempo estimado de sincronizacao</Text>
+          <Text style={styles.noticeText}>
+            Dependendo da velocidade do servidor e do volume do catalogo, a sincronizacao pode demorar de 30 minutos a 2 horas.
+            Em servidores com mais de 100 mil conteudos, esse tempo pode variar ainda mais.
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.progressCard}>
+        <View style={styles.progressTop}>
+          <Text style={styles.progressLabel}>Progresso total</Text>
+          <Text style={styles.progressValue}>{progress}%</Text>
+        </View>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${progress}%` }]} />
+          <View style={[styles.progressGlow, { left: `${Math.max(0, progress - 12)}%` }]} />
+          {!loadingDone && !failure ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.progressShimmer,
+                { transform: [{ translateX: shimmerTranslate }] },
+              ]}
+            />
+          ) : null}
+        </View>
+        <Text style={styles.progressFoot}>{doneCount}/{steps.length} etapas concluidas</Text>
+      </View>
+
+      <View style={styles.logCard}>
+        <View style={styles.logHeader}>
+          <Text style={styles.logTitle}>Atividade recente</Text>
+          <Text style={styles.logCount}>{logs.length} eventos</Text>
+        </View>
+        {recentLogs.length ? (
+          recentLogs.slice(0, 4).map((entry, index) => (
+            <View key={`${entry}-${index}`} style={styles.logRow}>
+              <View style={styles.logBullet} />
+              <Text style={styles.logText}>{entry}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.logEmpty}>Aguardando inicio da sincronizacao...</Text>
+        )}
+      </View>
+
+      <ScrollView style={styles.stepsList} contentContainerStyle={styles.stepsContent}>
+        {steps.map((step) => {
+          const status = stepStates[step.id] ?? 'pending';
+          const isActive = currentStep === step.id && status === 'loading';
+          const iconName = status === 'done' ? 'check-circle' : status === 'error' ? 'error' : step.icon;
+          const iconColor =
+            status === 'done'
+              ? StreamingTheme.colors.success
+              : status === 'error'
+                ? StreamingTheme.colors.accent
+                : status === 'loading'
+                  ? StreamingTheme.colors.accentAlt
+                  : StreamingTheme.colors.textMuted;
+
+          return (
+            <Animated.View
+              key={step.id}
+              style={[styles.stepCard, isActive && styles.stepCardActive, isActive && activePulseStyle]}
+            >
+              <Animated.View style={[styles.stepIconWrap, isActive && styles.stepIconWrapActive]}>
+                <MaterialIcons name={iconName as any} size={20} color={iconColor} />
+              </Animated.View>
+              <View style={styles.stepInfo}>
+                <View style={styles.stepTitleRow}>
+                  <Text style={styles.stepTitle}>{step.title}</Text>
+                  {isActive ? <Text style={styles.stepBadge}>Agora</Text> : null}
+                </View>
+                <Text style={styles.stepState}>
+                  {status === 'pending' && 'Aguardando'}
+                  {status === 'loading' && 'Carregando...'}
+                  {status === 'done' && 'Concluido'}
+                  {status === 'error' && 'Falhou'}
+                </Text>
+              </View>
+            </Animated.View>
+          );
+        })}
+      </ScrollView>
+
+
+      {failure && (
+        <>
+          <View style={styles.failureCard}>
+            <Text style={styles.failureTitle}>Falha na sincronizacao obrigatoria</Text>
+            <Text style={styles.failureMessage} numberOfLines={2}>{failure}</Text>
+          </View>
+          <TouchableOpacity style={styles.retryBtn} onPress={retry}>
+            <MaterialIcons name="refresh" size={18} color={StreamingTheme.colors.textPrimary} />
+            <Text style={styles.retryText}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {loadingDone && (
+        <TouchableOpacity
+          style={styles.enterBtn}
+          onPress={async () => {
+            const requireProfileSelection = await shouldRequireProfileSelection();
+            router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+          }}
+        >
+          <LinearGradient colors={StreamingTheme.gradients.accent} style={styles.enterGradient}>
+            <Text style={styles.enterText}>Entrar agora</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#000000ff',
-    },
-    header: {
-        paddingTop: StatusBar.currentHeight + 20,
-        paddingBottom: 20,
-        paddingHorizontal: 20,
-        borderBottomLeftRadius: 25,
-        borderBottomRightRadius: 25,
-    },
-    headerContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    headerText: {
-        marginLeft: 15,
-    },
-    appName: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: '#fff',
-    },
-    appTagline: {
-        fontSize: 14,
-        color: 'rgba(255,255,255,0.8)',
-        marginTop: 2,
-    },
-    content: {
-        flex: 1,
-        padding: 20,
-    },
-    // Cards Gerais
-    connectionCard: {
-        backgroundColor: '#1a1a1aff',
-        borderRadius: 15,
-        padding: 20,
-        marginBottom: 15,
-    },
-    overallProgressCard: {
-        backgroundColor: '#1a1a1aff',
-        borderRadius: 15,
-        padding: 20,
-        marginBottom: 15,
-    },
-    stepsCard: {
-        backgroundColor: '#1a1a1aff',
-        borderRadius: 15,
-        padding: 20,
-        marginBottom: 15,
-    },
-    downloadsCard: {
-        backgroundColor: '#1a1a1aff',
-        borderRadius: 15,
-        padding: 20,
-        marginBottom: 15,
-    },
-    statsCard: {
-        backgroundColor: '#1a1a1aff',
-        borderRadius: 15,
-        padding: 20,
-        marginBottom: 15,
-    },
-    logCard: {
-        backgroundColor: '#1a1a1aff',
-        borderRadius: 15,
-        padding: 20,
-        marginBottom: 20,
-    },
-    cardHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    cardTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#fff',
-        marginLeft: 10,
-    },
-    // Status da Conexão
-    connectionInfo: {
-        marginTop: 10,
-    },
-    connectionStatus: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 15,
-    },
-    statusDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        marginRight: 10,
-    },
-    statusText: {
-        fontSize: 16,
-        color: '#fff',
-        fontWeight: '500',
-    },
-    connectionProgress: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    progressBar: {
-        flex: 1,
-        height: 8,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 4,
-        overflow: 'hidden',
-        marginRight: 15,
-    },
-    progressFill: {
-        height: '100%',
-        backgroundColor: '#a70101ff',
-        borderRadius: 4,
-    },
-    progressText: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#fff',
-        minWidth: 40,
-    },
-    progressSubtext: {
-        fontSize: 12,
-        color: '#888',
-        marginTop: 5,
-    },
-    // Progresso Geral
-    progressContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 10,
-    },
-    // Etapas
-    stepItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 15,
-    },
-    stepIconContainer: {
-        width: 40,
-    },
-    stepText: {
-        flex: 1,
-        fontSize: 14,
-        fontWeight: '500',
-    },
-    // Downloads
-    downloadItem: {
-        marginBottom: 20,
-    },
-    downloadInfo: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 10,
-    },
-    downloadDetails: {
-        marginLeft: 10,
-        flex: 1,
-    },
-    downloadName: {
-        fontSize: 14,
-        fontWeight: '500',
-        color: '#fff',
-        marginBottom: 2,
-    },
-    downloadStatus: {
-        fontSize: 12,
-        color: '#888',
-    },
-    downloadProgress: {
-        marginLeft: 30,
-    },
-    downloadBar: {
-        height: 6,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 3,
-        overflow: 'hidden',
-        marginBottom: 5,
-    },
-    downloadFill: {
-        height: '100%',
-        backgroundColor: '#a70101ff',
-        borderRadius: 3,
-    },
-    downloadStats: {
-        fontSize: 11,
-        color: '#888',
-        textAlign: 'right',
-    },
-    // Estatísticas
-    statsGrid: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-    },
-    statBox: {
-        width: '48%',
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        borderRadius: 10,
-        padding: 15,
-        marginBottom: 10,
-        alignItems: 'center',
-    },
-    statNumber: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#fff',
-        marginVertical: 5,
-    },
-    statLabel: {
-        fontSize: 12,
-        color: '#888',
-        textTransform: 'uppercase',
-    },
-    // Log
-    logContent: {
-        backgroundColor: 'rgba(0,0,0,0.3)',
-        borderRadius: 8,
-        padding: 15,
-        maxHeight: 200,
-    },
-    logMessage: {
-        fontSize: 11,
-        color: '#aaa',
-        fontFamily: 'monospace',
-        marginBottom: 5,
-        lineHeight: 16,
-    },
-    logError: {
-        color: '#FF5252',
-    },
-    logSuccess: {
-        color: '#4CAF50',
-    },
-    logWarning: {
-        color: '#FF9800',
-    },
-    // Erro
-    errorContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 40,
-    },
-    errorTitle: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#fff',
-        marginTop: 20,
-        marginBottom: 10,
-    },
-    errorMessage: {
-        fontSize: 14,
-        color: 'rgba(255,255,255,0.7)',
-        textAlign: 'center',
-        marginBottom: 30,
-        paddingHorizontal: 20,
-    },
-    retryButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#a70101ff',
-        paddingHorizontal: 30,
-        paddingVertical: 15,
-        borderRadius: 25,
-        marginBottom: 15,
-    },
-    retryButtonText: {
-        color: '#fff',
-        fontWeight: 'bold',
-        marginLeft: 10,
-    },
-    backButton: {
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-    },
-    backButtonText: {
-        color: '#a70101ff',
-        fontWeight: '500',
-    },
-    // Rodapé
-    footer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingVertical: 15,
-        borderTopWidth: 1,
-        borderTopColor: '#333',
-        backgroundColor: '#0a0a0aff',
-    },
-    footerContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    footerText: {
-        fontSize: 12,
-        color: '#888',
-        marginLeft: 8,
-    },
-    footerError: {
-        color: '#FF5252',
-    },
-    version: {
-        fontSize: 12,
-        color: '#666',
-    },
+  container: {
+    flex: 1,
+    backgroundColor: StreamingTheme.colors.background,
+    paddingHorizontal: 18,
+    paddingBottom: 24,
+  },
+  bgOrbPrimary: {
+    position: 'absolute',
+    top: 72,
+    right: -54,
+    width: 168,
+    height: 168,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,59,48,0.16)',
+  },
+  bgOrbSecondary: {
+    position: 'absolute',
+    top: 210,
+    left: -46,
+    width: 126,
+    height: 126,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,143,58,0.10)',
+  },
+  header: {
+    marginTop: 8,
+    marginBottom: 14,
+  },
+  kickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: StreamingTheme.colors.accentAlt,
+  },
+  kicker: {
+    color: StreamingTheme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  title: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 30,
+    fontWeight: '900',
+  },
+  subtitle: {
+    color: StreamingTheme.colors.textSecondary,
+    marginTop: 6,
+    lineHeight: 21,
+  },
+  heroCard: {
+    borderRadius: 22,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  heroGradient: {
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    padding: 16,
+  },
+  heroTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  heroTextWrap: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 10,
+  },
+  heroLabel: {
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  heroTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.10)',
+    paddingTop: 14,
+  },
+  statChip: {
+    flex: 1,
+  },
+  statDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    marginHorizontal: 10,
+  },
+  statValue: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  statLabel: {
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 11,
+    marginTop: 3,
+  },
+  noticeCard: {
+    flexDirection: 'row',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,200,87,0.20)',
+    backgroundColor: 'rgba(255,200,87,0.08)',
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  noticeContent: {
+    flex: 1,
+  },
+  noticeTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  noticeText: {
+    color: StreamingTheme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  progressCard: {
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: 'rgba(16,21,37,0.88)',
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  progressTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  progressLabel: { color: StreamingTheme.colors.textSecondary, fontWeight: '700' },
+  progressValue: { color: StreamingTheme.colors.textPrimary, fontWeight: '900', fontSize: 20 },
+  progressTrack: {
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    marginTop: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: StreamingTheme.colors.accent,
+  },
+  progressGlow: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: '18%',
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  progressShimmer: {
+    position: 'absolute',
+    top: -6,
+    bottom: -6,
+    width: 84,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  progressFoot: {
+    marginTop: 8,
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 12,
+  },
+  logCard: {
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: 'rgba(10,14,24,0.72)',
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+  },
+  logHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  logTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
+  },
+  logCount: {
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 11,
+  },
+  logRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 8,
+  },
+  logBullet: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    marginTop: 6,
+    backgroundColor: StreamingTheme.colors.accentAlt,
+  },
+  logText: {
+    flex: 1,
+    color: StreamingTheme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  logEmpty: {
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 12,
+  },
+  stepsList: {
+    flex: 1,
+  },
+  stepsContent: {
+    gap: 10,
+    paddingBottom: 14,
+  },
+  stepCard: {
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: StreamingTheme.colors.surface,
+    borderRadius: 16,
+    padding: 12,
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  stepCardActive: {
+    backgroundColor: StreamingTheme.colors.surfaceAlt,
+    borderColor: 'rgba(255,143,58,0.42)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  stepIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  stepIconWrapActive: {
+    backgroundColor: 'rgba(255,143,58,0.12)',
+  },
+  stepInfo: {
+    flex: 1,
+  },
+  stepTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  stepTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '700',
+  },
+  stepBadge: {
+    color: StreamingTheme.colors.accentAlt,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  stepState: {
+    marginTop: 2,
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 12,
+  },
+  failureCard: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,120,120,0.35)',
+    borderRadius: 14,
+    backgroundColor: 'rgba(120,22,22,0.26)',
+    padding: 12,
+  },
+  failureTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  failureMessage: {
+    color: StreamingTheme.colors.textSecondary,
+    fontSize: 12,
+  },
+  retryBtn: {
+    marginTop: 10,
+    height: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: StreamingTheme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  retryText: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
+  },
+  enterBtn: {
+    marginTop: 12,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  enterGradient: {
+    minHeight: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  enterText: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
+    fontSize: 16,
+  },
 });

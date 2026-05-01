@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel Admin - AS IPTV</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #07090f;
+      --surface: #161b2e;
+      --surface-alt: #1c2340;
+      --border: rgba(255,255,255,0.12);
+      --text: #f7f9ff;
+      --muted: #a8b2d1;
+      --accent: #ff3b30;
+      --accent-alt: #ff8f3a;
+      --ok: #2cd07f;
+      --warn: #ffc857;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+      background: radial-gradient(1200px 500px at 50% -10%, #1e0e2f, #0d1a38 45%, #07090f 100%);
+      color: var(--text);
+    }
+    .container {
+      width: min(1200px, 96%);
+      margin: 24px auto 48px;
+    }
+    .card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      backdrop-filter: blur(14px);
+      margin-bottom: 16px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin: 0;
+      letter-spacing: -0.5px;
+    }
+    .muted { color: var(--muted); font-size: 0.92rem; }
+    input, select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      min-height: 42px;
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      min-height: 42px;
+      padding: 0 14px;
+      cursor: pointer;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+    }
+    button.ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .user-card {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .pill {
+      display: inline-block;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-right: 6px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .pill.ok { border-color: rgba(44,208,127,0.5); color: var(--ok); }
+    .pill.off { border-color: rgba(255,59,48,0.5); color: var(--accent); }
+    .status {
+      min-height: 22px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .status.error { color: #ff938c; }
+    .status.ok { color: var(--ok); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <div>
+          <h1>Painel Admin AS IPTV</h1>
+          <div class="muted">Gerencie usuarios, planos e ativacao diretamente no servidor.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="loginCard">
+      <div class="row">
+        <input id="adminToken" placeholder="Token admin (ADMIN_TOKEN)" style="flex:1;min-width:260px" />
+        <button id="loginBtn">Entrar</button>
+      </div>
+      <div class="status" id="loginStatus"></div>
+    </div>
+
+    <div class="card" id="actionsCard" style="display:none">
+      <div class="row">
+        <button id="refreshBtn" class="ghost">Atualizar usuarios</button>
+        <button id="logoutBtn" class="ghost">Sair</button>
+      </div>
+      <div class="status" id="actionStatus"></div>
+    </div>
+
+    <div id="usersGrid" class="grid"></div>
+  </div>
+
+  <script>
+    const plans = ['free', 'plus', 'pro', 'ultra', 'lifetime'];
+    const usersGrid = document.getElementById('usersGrid');
+    const loginCard = document.getElementById('loginCard');
+    const actionsCard = document.getElementById('actionsCard');
+    const loginStatus = document.getElementById('loginStatus');
+    const actionStatus = document.getElementById('actionStatus');
+    const adminTokenInput = document.getElementById('adminToken');
+
+    let token = localStorage.getItem('admin.jwt') || '';
+
+    function setStatus(el, text, ok = true) {
+      el.textContent = text || '';
+      el.className = 'status ' + (text ? (ok ? 'ok' : 'error') : '');
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, {
+        ...opts,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(opts.headers || {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Erro ${res.status}`);
+      return body;
+    }
+
+    function userCard(user) {
+      const wrap = document.createElement('div');
+      wrap.className = 'user-card';
+
+      const statusPill = user.plan.enabled ? '<span class="pill ok">Ativo</span>' : '<span class="pill off">Desativado</span>';
+      const backupPill = user.sync.hasBackup ? '<span class="pill ok">Backup: sim</span>' : '<span class="pill">Backup: nao</span>';
+
+      wrap.innerHTML = `
+        <div style="font-weight:700;font-size:1rem">${user.name || 'Sem nome'}</div>
+        <div class="muted" style="margin-bottom:8px">${user.email}</div>
+        <div style="margin-bottom:8px">${statusPill}${backupPill}</div>
+        <div class="muted">Plano atual: <strong style="color:#f7f9ff">${user.plan.planId}</strong></div>
+        <div class="muted">Status: ${user.plan.status}</div>
+        <div class="muted">Ultimo login: ${user.lastLoginAt || '-'}</div>
+        <div class="muted">Ultimo sync: ${user.sync.lastSyncAt || '-'}</div>
+        <div class="row" style="margin-top:10px">
+          <select class="plan-select" style="flex:1;min-width:120px">
+            ${plans.map((p) => `<option value="${p}" ${p===user.plan.planId?'selected':''}>${p}</option>`).join('')}
+          </select>
+          <select class="status-select" style="flex:1;min-width:120px">
+            <option value="active" ${user.plan.status==='active'?'selected':''}>active</option>
+            <option value="grace" ${user.plan.status==='grace'?'selected':''}>grace</option>
+            <option value="expired" ${user.plan.status==='expired'?'selected':''}>expired</option>
+            <option value="unknown" ${user.plan.status==='unknown'?'selected':''}>unknown</option>
+          </select>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="save-btn" style="flex:1">Salvar plano</button>
+          <button class="toggle-btn ghost" style="flex:1">${user.plan.enabled ? 'Desativar' : 'Ativar'}</button>
+        </div>
+        <div class="status"></div>
+      `;
+
+      const saveBtn = wrap.querySelector('.save-btn');
+      const toggleBtn = wrap.querySelector('.toggle-btn');
+      const planSelect = wrap.querySelector('.plan-select');
+      const statusSelect = wrap.querySelector('.status-select');
+      const localStatus = wrap.querySelector('.status');
+
+      saveBtn.addEventListener('click', async () => {
+        try {
+          setStatus(localStatus, 'Salvando...', true);
+          await api(`/api/admin/users/${user.id}/plan`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              planId: planSelect.value,
+              status: statusSelect.value,
+              enabled: user.plan.enabled,
+            }),
+          });
+          setStatus(localStatus, 'Plano atualizado', true);
+          await loadUsers();
+        } catch (err) {
+          setStatus(localStatus, err.message, false);
+        }
+      });
+
+      toggleBtn.addEventListener('click', async () => {
+        try {
+          setStatus(localStatus, 'Atualizando ativacao...', true);
+          await api(`/api/admin/users/${user.id}/active`, {
+            method: 'PATCH',
+            body: JSON.stringify({ active: !user.plan.enabled }),
+          });
+          setStatus(localStatus, 'Ativacao atualizada', true);
+          await loadUsers();
+        } catch (err) {
+          setStatus(localStatus, err.message, false);
+        }
+      });
+
+      return wrap;
+    }
+
+    async function loadUsers() {
+      try {
+        setStatus(actionStatus, 'Carregando usuarios...', true);
+        const body = await api('/api/admin/users');
+        usersGrid.innerHTML = '';
+        for (const user of body.users || []) {
+          usersGrid.appendChild(userCard(user));
+        }
+        setStatus(actionStatus, `${(body.users || []).length} usuario(s) carregado(s).`, true);
+      } catch (err) {
+        setStatus(actionStatus, err.message, false);
+      }
+    }
+
+    async function login() {
+      try {
+        setStatus(loginStatus, 'Entrando...', true);
+        const body = await api('/api/admin/login', {
+          method: 'POST',
+          body: JSON.stringify({ token: adminTokenInput.value.trim() }),
+          headers: {},
+        });
+        token = body.token;
+        localStorage.setItem('admin.jwt', token);
+        loginCard.style.display = 'none';
+        actionsCard.style.display = 'block';
+        setStatus(loginStatus, '');
+        await loadUsers();
+      } catch (err) {
+        setStatus(loginStatus, err.message, false);
+      }
+    }
+
+    function logout() {
+      token = '';
+      localStorage.removeItem('admin.jwt');
+      usersGrid.innerHTML = '';
+      loginCard.style.display = 'block';
+      actionsCard.style.display = 'none';
+      setStatus(actionStatus, '');
+    }
+
+    document.getElementById('loginBtn').addEventListener('click', login);
+    document.getElementById('refreshBtn').addEventListener('click', loadUsers);
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    if (token) {
+      loginCard.style.display = 'none';
+      actionsCard.style.display = 'block';
+      loadUsers();
+    }
+  </script>
+</body>
+</html>

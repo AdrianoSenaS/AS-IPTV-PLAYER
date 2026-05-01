@@ -1,1085 +1,1457 @@
-import React, { useEffect, useState } from 'react';
+import { MaterialIcons } from '@expo/vector-icons';
+import { getDbValue } from '@/services/local-db';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
-  Dimensions,
+  Alert,
+  Animated,
+  Easing,
   FlatList,
+  InteractionManager,
   RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Image } from 'expo-image';
-
+import { AppBackdrop } from '@/components/app-backdrop';
+import { PageLoader } from '@/components/page-loader';
+import { ParentalUnlockModal } from '@/components/parental-unlock-modal';
+import { RecommendationChip } from '@/components/recommendation-chip';
+import { usePlanGate } from '@/hooks/use-plan-gate';
+import { useScreenBenchmark } from '@/hooks/use-screen-benchmark';
 import {
-  MaterialIcons
-} from '@expo/vector-icons';
+  AccessSnapshot,
+  filterBlockedContent,
+  loadAccessSnapshot,
+  shouldHideContentImages,
+  unlockParentalAccess,
+} from '@/services/access-control';
+import {
+  queryCatalogItemsByIds,
+  queryCatalogPage,
+  sanitizeLabelText,
+  StreamItem,
+  toText,
+} from '../../services/catalog-data';
+import { StreamingTheme } from '@/constants/streaming-theme';
+import { loadMovieProgressMap, MovieProgressMap } from '@/services/movie-progress';
+import { loadSeriesProgressMap, SeriesProgressMap } from '@/services/series-progress';
+import { buildLiveUrl } from '@/services/stream-url';
+import {
+  buildUserTasteProfile,
+  getRecommendationReasons,
+  rankContentByTaste,
+  UserTasteProfile,
+} from '@/services/taste-recommender';
+import { hasFeature as subscriptionHasFeature } from '@/services/subscription';
+import { buildTmdbMetadataForCatalog, rankCatalogByTmdb, TmdbMeta } from '@/services/tmdb';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system/legacy';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import { SafeAreaView, } from 'react-native-safe-area-context';
+type ContinueItem = {
+  id: string;
+  type: 'movie' | 'series';
+  title: string;
+  subtitle: string;
+  image: string;
+  progress: number;
+  updatedAt: string;
+  streamId?: string;
+  seriesId?: string;
+};
 
+type FeaturedItem = {
+  id: string;
+  type: 'movie' | 'series';
+  data: StreamItem;
+};
 
-const { width: screenWidth } = Dimensions.get('window');
-const CAROUSEL_HEIGHT = 220;
-const POSTER_WIDTH = 120;
-const POSTER_HEIGHT = 180;
+type SearchItem = {
+  id: string;
+  type: 'movie' | 'series' | 'live';
+  title: string;
+  subtitle: string;
+  image: string;
+  data: StreamItem;
+};
 
-export default function MainScreen() {
-  const [refreshing, setRefreshing] = useState(false);
-  const [user, SetUser] = useState('')
-  const [CountStream, SetCountStream] = useState(10)
+type ContextBannerMeta = {
+  message: string;
+  icon: keyof typeof MaterialIcons.glyphMap;
+  tint: string;
+  background: string;
+  border: string;
+};
 
+const HOME_SEARCH_LIMIT = 8;
+const HOME_PROFILE_SAMPLE_LIMIT = 320;
+const HOME_VOD_POOL_LIMIT = 420;
+const HOME_SERIES_POOL_LIMIT = 420;
+const HOME_LIVE_POOL_LIMIT = 220;
+
+export default function HomeScreen() {
   const router = useRouter();
+  useScreenBenchmark('home');
 
-  // Filmes populares
-  const [popularMovies, setPopularMovies] = useState([]);
-  // Destaques (carrossel)
-  const [featuredContent, setFeaturedContent] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [userName, setUserName] = useState('');
+  const { hasFeature, isFree } = usePlanGate();
 
-  // Canais ao vivo
-  const [liveChannels, setLiveChannels] = useState([]);
+  const [featuredContent, setFeaturedContent] = useState<StreamItem[]>([]);
+  const [featuredItems, setFeaturedItems] = useState<FeaturedItem[]>([]);
+  const [popularMovies, setPopularMovies] = useState<StreamItem[]>([]);
+  const [liveChannels, setLiveChannels] = useState<StreamItem[]>([]);
+  const [featuredSeries, setFeaturedSeries] = useState<StreamItem[]>([]);
+  const [homeSearch, setHomeSearch] = useState('');
+  const [activeFeaturedIndex, setActiveFeaturedIndex] = useState(0);
+  const [searchResults, setSearchResults] = useState<SearchItem[]>([]);
+  const [continueWatchingItems, setContinueWatchingItems] = useState<ContinueItem[]>([]);
+  const [movieTmdbMap, setMovieTmdbMap] = useState<Record<string, TmdbMeta>>({});
+  const [seriesTmdbMap, setSeriesTmdbMap] = useState<Record<string, TmdbMeta>>({});
+  const [movieProgressMap, setMovieProgressMap] = useState<MovieProgressMap>({});
+  const [seriesProgressMap, setSeriesProgressMap] = useState<SeriesProgressMap>({});
+  const [access, setAccess] = useState<AccessSnapshot | null>(null);
+  const [tasteProfile, setTasteProfile] = useState<UserTasteProfile | null>(null);
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const bannerTransition = useRef(new Animated.Value(1)).current;
+  const bannerContentTransition = useRef(new Animated.Value(1)).current;
+  const [bannerFrom, setBannerFrom] = useState<{ background: string; border: string } | null>(null);
+  const [bannerTo, setBannerTo] = useState<{ background: string; border: string } | null>(null);
+  const featuredListRef = useRef<FlatList<FeaturedItem>>(null);
+  const loadVersionRef = useRef(0);
+  const focusRefreshAtRef = useRef(0);
 
-  // Séries em destaque
-  const [featuredSeries, setFeaturedSeries] = useState([])
-  const GetUserNameLabel = async () => {
-    const user = await AsyncStorage.getItem('name')
-    user != null ? SetUser(`Para ${user}`) : null
-
-  }
-
-  const Login = async () => {
-    const userDb = await AsyncStorage.getItem('username')
-    if (userDb === null) {
-      router.replace('/login')
-      console.log(userDb)
-    } else {
-      GetUserNameLabel()
-      onRefresh()
-
-    }
-  }
-
-  const getFileUri = (fileName: string) => `${FileSystem.documentDirectory}${fileName}`;
-  const readDataStream = async (fileName: string) => {
-    try {
-      const fileUri = getFileUri(fileName);
-      const dataString = await FileSystem.readAsStringAsync(fileUri);
-      const dataObject = JSON.parse(dataString);
-      return dataObject
-    } catch (error) {
-      return null
-    }
+  const loadUser = async () => {
+    const name = await getDbValue<string>('name');
+    setUserName(name ? `Para ${name}` : 'Seu perfil');
   };
 
-  const apiTmdb = async () => {
-    const url = 'https://api.themoviedb.org/3/movie/popular?language=pt-Br&page=1';
-    const options = {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        Authorization: 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIzMWEzMzM5Yjg1MGE0ZDI4NDNiMjU5ZmI5ZWJiYTNmZiIsIm5iZiI6MTcyNzIxNjM0NC42OCwic3ViIjoiNjZmMzNhZDg1MDUxMzI4MzBlMjE2NDFhIiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.ymyuM-JNxbypJmoe1ByMoONM24elHMV_053-HYEQxl0'
-      }
-    };
+  const loadData = async () => {
+    const version = ++loadVersionRef.current;
+    const [vod, series, liveStreams, movieMap, seriesMap, snapshot] = await Promise.all([
+      queryCatalogPage({ kind: 'vod', offset: 0, limit: HOME_VOD_POOL_LIMIT }),
+      queryCatalogPage({ kind: 'series', offset: 0, limit: HOME_SERIES_POOL_LIMIT }),
+      queryCatalogPage({ kind: 'live', offset: 0, limit: HOME_LIVE_POOL_LIMIT }),
+      loadMovieProgressMap(),
+      loadSeriesProgressMap(),
+      loadAccessSnapshot(),
+    ]);
 
-    const result = (await fetch(url, options)).json();
-
-    return result
-
-  }
-
-  const getData = async () => {
-    const iptv_vodStreams = await readDataStream('iptv_vodStreams.json')
-    const iptv_liveCategories = await readDataStream('iptv_liveCategories.json')
-    const iptv_get_series = await readDataStream('iptv_series.json')
-    if (iptv_liveCategories !== null && iptv_vodStreams !== null && iptv_get_series !== null) {
-      let movieTMDBList: any = []
-      let m: any = []
-      let c: any = []
-      let l: any = []
-      let s: any = []
-
-      const movieTmbd = await apiTmdb()
-
-
-
-      iptv_vodStreams.map(movie => {
-        // c.push(movie)
-        //console.log(movie.stream_id)
-        movieTmbd.results.map(e => {
-
-          if (`https://image.tmdb.org/t/p/w300${e.poster_path}` == movie.stream_icon) {
-            console.log(movie)
-            c.push(movie)
-          }else{
-            
-          }
-        })
-      })
-      iptv_vodStreams.slice(5, 100).map(movie => {
-        m.push(movie)
-      })
-      iptv_liveCategories.slice(0, 100).map(tv => {
-        l.push(tv)
-        //console.log(tv)
-      })
-      iptv_get_series.slice(0, 100).map(series => {
-        s.push(series)
-        // console.log(series)
-      })
-
-      setFeaturedContent(c)
-      setPopularMovies(m)
-      setLiveChannels(l)
-      setFeaturedSeries(s)
-      setRefreshing(false)
-    } else {
-      router.replace('/loading')
+    // Não redireciona de volta ao loading: alguns servidores não têm séries
+    // e o redirect causava loop infinito. A tela trata listas vazias com estado vazio.
+    if (!vod.length && !series.length && !liveStreams.length) {
+      return;
     }
-  }
 
+    const vodList = vod as StreamItem[];
+    const seriesList = series as StreamItem[];
+    const liveList = liveStreams as StreamItem[];
 
+    setMovieProgressMap(movieMap);
+    setSeriesProgressMap(seriesMap);
+    setAccess(snapshot);
 
-  // Continue assistindo
-  const continueWatching = [
+    const quickHighlights = vodList.slice(0, 12);
+    const quickMovies = vodList.slice(0, 40);
+    const quickSeries = seriesList.slice(0, 40);
+    const quickLive = liveList.slice(0, 40);
 
-  ];
+    const featureMovies = quickHighlights.slice(0, 6).map((item, index) => ({
+      id: `featured-movie-${toText(item.stream_id, String(index))}`,
+      type: 'movie' as const,
+      data: item,
+    }));
+    const featureSeries = seriesList.slice(0, 6).map((item, index) => ({
+      id: `featured-series-${toText(item.series_id, String(index))}`,
+      type: 'series' as const,
+      data: item,
+    }));
 
+    const mixedFeatured = [...featureMovies, ...featureSeries].slice(0, 12);
 
+    setFeaturedContent(quickHighlights);
+    setFeaturedItems(mixedFeatured);
+    setPopularMovies(quickMovies);
+    setLiveChannels(quickLive);
+    setFeaturedSeries(quickSeries);
 
-  const onRefresh = () => {
+    InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        const [movieMeta, seriesMeta] = await Promise.all([
+          buildTmdbMetadataForCatalog(
+            vodList,
+            'movie',
+            (item) => toText(item.stream_id),
+            (item) => sanitizeLabelText(item.title || item.name, '')
+          ),
+          buildTmdbMetadataForCatalog(
+            seriesList,
+            'tv',
+            (item) => toText(item.series_id),
+            (item) => sanitizeLabelText(item.title || item.name, '')
+          ),
+        ]);
+
+        if (version !== loadVersionRef.current) return;
+
+        setMovieTmdbMap(movieMeta);
+        setSeriesTmdbMap(seriesMeta);
+
+        const [highlights, launchMovies, launchSeries, topSeries, planHasAlgorithm] = await Promise.all([
+          rankCatalogByTmdb(vodList, movieMeta, (item) => toText(item.stream_id), 'popular', 12),
+          rankCatalogByTmdb(vodList, movieMeta, (item) => toText(item.stream_id), 'release', 40),
+          rankCatalogByTmdb(seriesList, seriesMeta, (item) => toText(item.series_id), 'release', 40),
+          rankCatalogByTmdb(seriesList, seriesMeta, (item) => toText(item.series_id), 'rated', 40),
+          subscriptionHasFeature('recommendation_algorithm'),
+        ]);
+
+        const taste = planHasAlgorithm
+          ? await buildUserTasteProfile({
+              settings: snapshot.settings,
+              catalog: {
+                vod: vodList,
+                series: seriesList,
+                liveStreams: liveList,
+              },
+              movieProgressMap: movieMap,
+              seriesProgressMap: seriesMap,
+            })
+          : null;
+
+        if (version !== loadVersionRef.current) return;
+
+        setTasteProfile(taste);
+
+        const rankedHighlights = taste
+          ? rankContentByTaste(highlights, 'movie', taste, 12)
+          : highlights.slice(0, 12);
+        const rankedMovies = taste
+          ? rankContentByTaste(
+              launchMovies.length ? launchMovies : vodList.slice(0, 40),
+              'movie',
+              taste,
+              40
+            )
+          : (launchMovies.length ? launchMovies : vodList.slice(0, 40)).slice(0, 40);
+        const rankedSeries = taste
+          ? rankContentByTaste(
+              launchSeries.length ? launchSeries : topSeries.length ? topSeries : seriesList.slice(0, 40),
+              'series',
+              taste,
+              40
+            )
+          : (launchSeries.length ? launchSeries : topSeries.length ? topSeries : seriesList.slice(0, 40)).slice(0, 40);
+        const rankedLive = taste
+          ? rankContentByTaste(liveList, 'live', taste, 40)
+          : liveList.slice(0, 40);
+
+        setFeaturedContent(rankedHighlights);
+        setPopularMovies(rankedMovies);
+        setLiveChannels(rankedLive);
+        setFeaturedSeries(rankedSeries);
+      })().catch(() => {
+        // Falhas no enriquecimento nao devem bloquear a home.
+      });
+    });
+  };
+
+  const refreshProgressOnly = async () => {
+    const nowTs = Date.now();
+    if (nowTs - focusRefreshAtRef.current < 3000) {
+      return;
+    }
+    focusRefreshAtRef.current = nowTs;
+
+    const [movieMap, seriesMap, snapshot] = await Promise.all([
+      loadMovieProgressMap(),
+      loadSeriesProgressMap(),
+      loadAccessSnapshot(),
+    ]);
+    setMovieProgressMap(movieMap);
+    setSeriesProgressMap(seriesMap);
+    setAccess(snapshot);
+
+    InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        if (await subscriptionHasFeature('recommendation_algorithm')) {
+          const [vodSample, seriesSample, liveSample] = await Promise.all([
+            queryCatalogPage({ kind: 'vod', offset: 0, limit: HOME_PROFILE_SAMPLE_LIMIT }),
+            queryCatalogPage({ kind: 'series', offset: 0, limit: HOME_PROFILE_SAMPLE_LIMIT }),
+            queryCatalogPage({ kind: 'live', offset: 0, limit: Math.max(120, Math.floor(HOME_PROFILE_SAMPLE_LIMIT / 2)) }),
+          ]);
+
+          setTasteProfile(
+            await buildUserTasteProfile({
+              settings: snapshot.settings,
+              catalog: { vod: vodSample, series: seriesSample, liveStreams: liveSample },
+              movieProgressMap: movieMap,
+              seriesProgressMap: seriesMap,
+            })
+          );
+        } else {
+          setTasteProfile(null);
+        }
+      })().catch(() => {
+        // Atualizacao de recomendacao em foco e opcional.
+      });
+    });
+  };
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    getData();
+    try {
+      await Promise.all([loadUser(), loadData()]);
+    } finally {
+      setRefreshing(false);
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
-    Login()
-  }, [])
-
-
-  const GetStreamList = () => {
-    SetCountStream(CountStream + 10)
-    console.log("Buscando filmes")
-  }
-
-  const renderFeaturedItem = ({ item, index }: any) => (
-    < TouchableOpacity
-      style={styles.featuredCard}
-      activeOpacity={0.9}
-      onPress={() => router.navigate('/categoria')
+    const bootstrap = async () => {
+      const username = await getDbValue<string>('username');
+      if (!username) {
+        router.replace('/login');
+        return;
       }
-    >
-      <Image
-        source={{ uri: item.stream_icon }}
-        style={styles.featuredImage}
-        cachePolicy={"disk"}
-      />
-      <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.8)', '#000']}
-        style={styles.featuredGradient}
-      >
-        <View style={styles.featuredInfo}>
-          <View style={styles.ratingBadge}>
-            <MaterialIcons name="star" size={16} color="#FFD700" />
-            <Text style={styles.ratingText}>{item.rating}</Text>
-          </View>
-          <Text style={styles.featuredTitle}>{item.title}</Text>
-          <Text style={styles.featuredDesc}>{item.plot.length > 30 ? item.plot.substring(0, 30) + '...' : item.plot}</Text>
-          <View style={styles.featuredMeta}>
-            <Text style={styles.metaText}>{item.release_date}</Text>
-            <Text style={styles.metaDot}>•</Text>
-            <Text style={styles.metaText}>{item.duration}</Text>
-            <Text style={styles.metaDot}>•</Text>
-            <Text style={styles.metaText}>{item.genre}</Text>
-          </View>
-          <TouchableOpacity style={styles.playButton}>
-            <MaterialIcons name="play-arrow" size={28} color="#fff" />
-            <Text style={styles.playText}>Assistir</Text>
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-    </TouchableOpacity >
+      await onRefresh();
+    };
+
+    bootstrap();
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      void refreshProgressOnly();
+    }, [])
   );
 
-  const renderMovieCard = ({ item }: any) => (
+  const normalizedSearch = homeSearch.trim().toLowerCase();
 
+  useEffect(() => {
+    let canceled = false;
 
-    <TouchableOpacity
-      style={styles.movieCard}
-      activeOpacity={0.9}
-      onPress={() => navigation.navigate('Details', { movie: item })}
-    >
-      <Image
-        source={{ uri: item.stream_icon || item.cover }}
-        style={styles.posterImage}
-        cachePolicy='disk'
-      />
-      <View style={styles.qualityBadge}>
-        <Text style={styles.qualityText}>{item.quality || "hd"}</Text>
-      </View>
-      <View style={styles.movieInfo}>
-        <Text style={styles.movieTitle} numberOfLines={1}>{item.title}</Text>
-        <View style={styles.movieMeta}>
-          <Text style={styles.movieYear}>{item.release_date}</Text>
-          <View style={styles.ratingContainer}>
-            <MaterialIcons name="star" size={14} color="#FFD700" />
-            <Text style={styles.movieRating}>{item.rating}</Text>
-          </View>
-        </View>
-        <Text style={styles.movieDuration}>{item.duration}</Text>
-      </View>
-    </TouchableOpacity>
-  );
+    if (normalizedSearch.length < 2) {
+      setSearchResults([]);
+      return () => {
+        canceled = true;
+      };
+    }
 
-  const renderSeriesCard = ({ item }: any) => (
-    <TouchableOpacity
-      style={styles.seriesCard}
-      activeOpacity={0.9}
-      onPress={() => navigation.navigate('Series', { series: item })}
-    >
-      <Image
-        source={{ uri: item.cover }}
-        style={styles.seriesPoster}
-        cachePolicy='disk'
-      />
-      <View style={styles.seriesInfo}>
-        <View style={styles.seriesRating}>
-          <MaterialIcons name="star" size={14} color="#FFD700" />
-          <Text style={styles.seriesRatingText}>{item.rating_5based}</Text>
-        </View>
-        <Text style={styles.seriesTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.seriesSeason}>{item.num} Temporada</Text>
-      </View>
-    </TouchableOpacity>
-  );
+    InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        const [movies, series, live] = await Promise.all([
+          queryCatalogPage({ kind: 'vod', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
+          queryCatalogPage({ kind: 'series', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
+          queryCatalogPage({ kind: 'live', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
+        ]);
 
-  const renderContinueCard = ({ item }: any) => (
-    <TouchableOpacity
-      style={styles.continueCard}
-      activeOpacity={0.9}
-      onPress={() => navigation.navigate('Continue', { item })}
-    >
-      <View style={styles.continuePoster}>
-        <Image
-          source={{ uri: item.poster }}
-          style={styles.continueImage}
-          cachePolicy={'disk'}
-        />
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${item.progress}%` }]} />
-        </View>
-      </View>
-      <View style={styles.continueInfo}>
-        <Text style={styles.continueTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.continueSeason}>{item.season}</Text>
-        <Text style={styles.continueTime}>{item.timeLeft}</Text>
-        <TouchableOpacity style={styles.resumeButton}>
-          <MaterialIcons name="play-arrow" size={20} color="#fff" />
-          <Text style={styles.resumeText}>Continuar</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
+        if (canceled) return;
 
-  const renderChannelCard = ({ item }: any) => (
-    <TouchableOpacity style={styles.channelCard}>
-      <View style={styles.channelLogo}>
-        <View style={styles.liveBadge}>
-          <View style={styles.liveDot} />
+        const mappedMovies = movies.map((item) => ({
+          id: `search-movie-${toText(item.stream_id)}`,
+          type: 'movie' as const,
+          title: sanitizeLabelText(item.title || item.name, 'Filme'),
+          subtitle: 'Filme',
+          image: movieTmdbMap[toText(item.stream_id)]?.posterUrl || toText(item.stream_icon || item.cover),
+          data: item,
+        }));
 
-          <Text style={styles.liveText}>AO VIVO</Text>
-        </View>
+        const mappedSeries = series.map((item) => ({
+          id: `search-series-${toText(item.series_id)}`,
+          type: 'series' as const,
+          title: sanitizeLabelText(item.title || item.name, 'Serie'),
+          subtitle: 'Serie',
+          image: seriesTmdbMap[toText(item.series_id)]?.posterUrl || toText(item.stream_icon || item.cover),
+          data: item,
+        }));
 
-      </View>
-      <Text style={styles.channelName}>{item.category_name}</Text>
-      <Text style={styles.channelCategory}>{item.category}</Text>
-      <View style={styles.viewersContainer}>
-        <MaterialIcons name="visibility" size={12} color="#888" />
-        <Text style={styles.viewersText}>{item.viewers}</Text>
-      </View>
-    </TouchableOpacity>
-  );
+        const mappedLive = live.map((item) => ({
+          id: `search-live-${toText(item.stream_id)}`,
+          type: 'live' as const,
+          title: sanitizeLabelText(item.name || item.title, 'Canal ao vivo'),
+          subtitle: 'TV ao vivo',
+          image: toText(item.stream_icon || item.cover),
+          data: item,
+        }));
+
+        const merged = [...mappedMovies, ...mappedSeries, ...mappedLive].slice(0, HOME_SEARCH_LIMIT * 3);
+        setSearchResults(
+          access
+            ? filterBlockedContent(access, merged, (item) => `${item.title} ${item.subtitle}`)
+            : merged
+        );
+      })().catch(() => {
+        if (!canceled) {
+          setSearchResults([]);
+        }
+      });
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [normalizedSearch, access, movieTmdbMap, seriesTmdbMap]);
+
+  const openMovie = (item: StreamItem) => {
+    const id = toText(item.stream_id);
+    if (!id) return;
+    router.navigate(`/filme-detalhe?streamId=${encodeURIComponent(id)}` as any);
+  };
+
+  const openSeries = (item: StreamItem) => {
+    const id = toText(item.series_id);
+    if (!id) return;
+    router.navigate({
+      pathname: '/serie-detalhe',
+      params: {
+        seriesId: id,
+        title: sanitizeLabelText(item.title || item.name, 'Serie'),
+        cover: toText(item.stream_icon || item.cover),
+      },
+    });
+  };
+
+  const openLive = async (item: StreamItem) => {
+    const url = await buildLiveUrl(item);
+    if (!url) {
+      Alert.alert('Erro', 'Nao foi possivel carregar o canal ao vivo.');
+      return;
+    }
+    router.navigate({
+      pathname: '/player',
+      params: {
+        mode: 'live',
+        contentId: toText(item.stream_id || item.name || item.title),
+        title: sanitizeLabelText(item.name || item.title, 'Canal ao vivo'),
+        url,
+      },
+    });
+  };
+
+  const openSearchResult = (item: SearchItem) => {
+    if (item.type === 'movie') {
+      openMovie(item.data);
+      return;
+    }
+    if (item.type === 'series') {
+      openSeries(item.data);
+      return;
+    }
+    openLive(item.data);
+  };
+
+  const openFeatured = (item: FeaturedItem) => {
+    if (item.type === 'movie') {
+      openMovie(item.data);
+      return;
+    }
+    openSeries(item.data);
+  };
+
+  useEffect(() => {
+    let canceled = false;
+
+    void (async () => {
+      const movieProgressEntries = Object.entries(movieProgressMap)
+        .filter(([, state]) => state.progressPercent > 0 && state.progressPercent < 95)
+        .sort((a, b) => (a[1].updatedAt > b[1].updatedAt ? -1 : 1));
+
+      const seriesProgressEntries = Object.entries(seriesProgressMap)
+        .map(([seriesId, seriesState]) => {
+          const latestEpisode = Object.entries(seriesState.episodes || {})
+            .filter(([, episode]) => episode.progress > 0 && episode.progress < 100)
+            .sort((a, b) => (a[1].updatedAt > b[1].updatedAt ? -1 : 1))[0];
+
+          if (!latestEpisode) return null;
+
+          return { seriesId, latestEpisode };
+        })
+        .filter(Boolean) as Array<{
+        seriesId: string;
+        latestEpisode: [string, { progress: number; updatedAt: string }];
+      }>;
+
+      const [movieById, seriesById] = await Promise.all([
+        queryCatalogItemsByIds(
+          'vod',
+          movieProgressEntries.slice(0, 50).map(([movieId]) => movieId)
+        ),
+        queryCatalogItemsByIds(
+          'series',
+          seriesProgressEntries.slice(0, 50).map((entry) => entry.seriesId)
+        ),
+      ]);
+
+      if (canceled) return;
+
+      const movieItems: ContinueItem[] = movieProgressEntries
+        .map(([movieId, state]) => {
+          const movie = movieById[movieId];
+          if (!movie) return null;
+
+          return {
+            id: `movie-${movieId}`,
+            type: 'movie',
+            title: sanitizeLabelText(movie.title || movie.name, 'Filme'),
+            subtitle: `Retomar em ${Math.floor(state.positionMs / 60000)} min`,
+            image: toText(movie.stream_icon || movie.cover),
+            progress: state.progressPercent,
+            updatedAt: state.updatedAt,
+            streamId: movieId,
+          };
+        })
+        .filter(Boolean) as ContinueItem[];
+
+      const seriesItems: ContinueItem[] = seriesProgressEntries
+        .map(({ seriesId, latestEpisode }) => {
+          const [key, episodeState] = latestEpisode;
+          const [season, episode] = key.split(':').map(Number);
+          const series = seriesById[seriesId];
+          if (!series) return null;
+
+          return {
+            id: `series-${seriesId}`,
+            type: 'series',
+            title: sanitizeLabelText(series.title || series.name, 'Serie'),
+            subtitle: `S${season} E${episode}`,
+            image: toText(series.stream_icon || series.cover),
+            progress: episodeState.progress,
+            updatedAt: episodeState.updatedAt,
+            seriesId,
+          };
+        })
+        .filter(Boolean) as ContinueItem[];
+
+      const merged = [...movieItems, ...seriesItems]
+        .sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1))
+        .slice(0, 20);
+
+      setContinueWatchingItems(
+        access
+          ? filterBlockedContent(access, merged, (item) => `${item.title} ${item.subtitle}`)
+          : merged
+      );
+    })().catch(() => {
+      if (!canceled) {
+        setContinueWatchingItems([]);
+      }
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [movieProgressMap, seriesProgressMap, access]);
+
+  const displayFeaturedItems = useMemo(() => {
+    if (!access) return featuredItems;
+
+    return filterBlockedContent(
+      access,
+      featuredItems,
+      (item) =>
+        `${toText(item.data.title || item.data.name)} ${toText(item.data.category_name)} ${toText(item.data.genre)} ${toText(item.data.plot)}`
+    );
+  }, [featuredItems, access]);
+
+  const displayPopularMovies = useMemo(() => {
+    if (!access) return popularMovies;
+
+    return filterBlockedContent(
+      access,
+      popularMovies,
+      (item) => `${toText(item.title || item.name)} ${toText(item.category_name)} ${toText(item.genre)} ${toText(item.plot)}`
+    );
+  }, [popularMovies, access]);
+
+  const displayFeaturedSeries = useMemo(() => {
+    if (!access) return featuredSeries;
+
+    return filterBlockedContent(
+      access,
+      featuredSeries,
+      (item) => `${toText(item.title || item.name)} ${toText(item.category_name)} ${toText(item.genre)} ${toText(item.plot)}`
+    );
+  }, [featuredSeries, access]);
+
+  const displayLiveChannels = useMemo(() => {
+    if (!access) return liveChannels;
+
+    return filterBlockedContent(
+      access,
+      liveChannels,
+      (item) => `${toText(item.name || item.title)} ${toText(item.category_name)}`
+    );
+  }, [liveChannels, access]);
+
+  const hideImages = !!access && shouldHideContentImages(access);
+
+  const handleUnlock = async (pin: string) => {
+    const ok = await unlockParentalAccess(pin);
+    if (!ok) {
+      Alert.alert('PIN incorreto', 'Nao foi possivel desbloquear o conteudo.');
+      return;
+    }
+
+    setShowUnlockModal(false);
+    setAccess(await loadAccessSnapshot());
+  };
+
+  useEffect(() => {
+    if (displayFeaturedItems.length <= 1) return;
+
+    const timer = setInterval(() => {
+      setActiveFeaturedIndex((prev) => {
+        const next = (prev + 1) % displayFeaturedItems.length;
+        featuredListRef.current?.scrollToIndex({ index: next, animated: true });
+        return next;
+      });
+    }, 4500);
+
+    return () => clearInterval(timer);
+  }, [displayFeaturedItems.length]);
+
+  const openContinueItem = (item: ContinueItem) => {
+    if (item.type === 'movie' && item.streamId) {
+      router.navigate(`/filme-detalhe?streamId=${encodeURIComponent(item.streamId)}` as any);
+      return;
+    }
+
+    if (item.type === 'series' && item.seriesId) {
+      router.navigate({
+        pathname: '/serie-detalhe',
+        params: {
+          seriesId: item.seriesId,
+          title: sanitizeLabelText(item.title, 'Serie'),
+          cover: toText(item.image),
+        },
+      });
+    }
+  };
+
+  const getReasonLabel = (item: StreamItem, type: 'movie' | 'series' | 'live') => {
+    if (!tasteProfile) return '';
+    return getRecommendationReasons(item, type, tasteProfile)[0] || '';
+  };
+
+  const contextualNudge = useMemo<ContextBannerMeta>(() => {
+    const now = new Date();
+    const hour = now.getHours();
+    const isNight = hour >= 18 && hour < 24;
+    const isWeekend = [0, 6].includes(now.getDay());
+
+    if (!tasteProfile) {
+      if (isNight) {
+        return {
+          message: 'Boa noite: selecionamos titulos para relaxar e assistir por mais tempo.',
+          icon: 'nights-stay',
+          tint: '#5DA8FF',
+          background: 'rgba(93,168,255,0.14)',
+          border: 'rgba(93,168,255,0.36)',
+        };
+      }
+      if (isWeekend) {
+        return {
+          message: 'Fim de semana no ar: aproveite para descobrir algo novo.',
+          icon: 'event',
+          tint: '#FFD166',
+          background: 'rgba(255,209,102,0.15)',
+          border: 'rgba(255,209,102,0.38)',
+        };
+      }
+      return {
+        message: 'Sua selecao se adapta ao seu ritmo de uso no app.',
+        icon: 'auto-awesome',
+        tint: StreamingTheme.colors.accentAlt,
+        background: 'rgba(255,143,58,0.14)',
+        border: 'rgba(255,143,58,0.38)',
+      };
+    }
+
+    const movieScore = tasteProfile.typeScores.movie || 0;
+    const seriesScore = tasteProfile.typeScores.series || 0;
+    const liveScore = tasteProfile.typeScores.live || 0;
+
+    const topType: 'movie' | 'series' | 'live' =
+      seriesScore >= movieScore && seriesScore >= liveScore
+        ? 'series'
+        : movieScore >= liveScore
+          ? 'movie'
+          : 'live';
+
+    if (isWeekend && topType === 'series') {
+      return {
+        message: 'Fim de semana com cara de maratona: mais series relevantes para voce.',
+        icon: 'local-fire-department',
+        tint: '#FF9F43',
+        background: 'rgba(255,159,67,0.16)',
+        border: 'rgba(255,159,67,0.4)',
+      };
+    }
+
+    if (isNight && (topType === 'movie' || topType === 'series')) {
+      return {
+        message: `Noite ideal para ${topType === 'movie' ? 'filmes' : 'series'}: ranqueamos opcoes com maior match.`,
+        icon: topType === 'movie' ? 'movie' : 'tv',
+        tint: '#8EC5FF',
+        background: 'rgba(142,197,255,0.16)',
+        border: 'rgba(142,197,255,0.42)',
+      };
+    }
+
+    if (isWeekend) {
+      return {
+        message: 'Fim de semana ativo: seu ranking recebeu boost para sessoes mais longas.',
+        icon: 'event',
+        tint: '#FFD166',
+        background: 'rgba(255,209,102,0.15)',
+        border: 'rgba(255,209,102,0.38)',
+      };
+    }
+
+    if (isNight) {
+      return {
+        message: 'Horario nobre: priorizamos conteudos que combinam com seu habito noturno.',
+        icon: 'schedule',
+        tint: '#5DA8FF',
+        background: 'rgba(93,168,255,0.14)',
+        border: 'rgba(93,168,255,0.36)',
+      };
+    }
+
+    return {
+      message: 'Recomendacoes inteligentes atualizadas conforme seu perfil e horario.',
+      icon: 'auto-awesome',
+      tint: StreamingTheme.colors.accentAlt,
+      background: 'rgba(255,143,58,0.14)',
+      border: 'rgba(255,143,58,0.38)',
+    };
+  }, [tasteProfile]);
+
+  useEffect(() => {
+    const next = { background: contextualNudge.background, border: contextualNudge.border };
+
+    if (!bannerTo) {
+      setBannerFrom(next);
+      setBannerTo(next);
+      return;
+    }
+
+    const unchanged =
+      bannerTo.background === next.background &&
+      bannerTo.border === next.border;
+
+    if (unchanged) return;
+
+    setBannerFrom(bannerTo);
+    setBannerTo(next);
+    bannerTransition.setValue(0);
+    Animated.timing(bannerTransition, {
+      toValue: 1,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [contextualNudge.background, contextualNudge.border, bannerTo, bannerTransition]);
+
+  useEffect(() => {
+    bannerContentTransition.setValue(0);
+    Animated.timing(bannerContentTransition, {
+      toValue: 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [contextualNudge.message, contextualNudge.icon, contextualNudge.tint, bannerContentTransition]);
+
+  const animatedBannerBackground = bannerTransition.interpolate({
+    inputRange: [0, 1],
+    outputRange: [
+      bannerFrom?.background || contextualNudge.background,
+      bannerTo?.background || contextualNudge.background,
+    ],
+  });
+
+  const animatedBannerBorder = bannerTransition.interpolate({
+    inputRange: [0, 1],
+    outputRange: [
+      bannerFrom?.border || contextualNudge.border,
+      bannerTo?.border || contextualNudge.border,
+    ],
+  });
+
+  const animatedBannerContentY = bannerContentTransition.interpolate({
+    inputRange: [0, 1],
+    outputRange: [5, 0],
+  });
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#7e1a1aff" />
+      <StatusBar barStyle="light-content" />
+      <AppBackdrop blurIntensity={30} />
+      <PageLoader visible={isLoading} label="Atualizando inicio" />
+
       <ScrollView
-        contentContainerStyle={styles.scrollContainer}
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-
-        scrollEventThrottle={16}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#a70101ff']}
-            tintColor="#a70101ff"
-          />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
       >
-        {/* Header Principal */}
-        <LinearGradient
-          colors={['#490202ff', '#2c0101ff', '#000000ff']}
-          style={styles.mainHeader}
-        >
-          <View style={styles.topBar}>
-            <TouchableOpacity >
-            </TouchableOpacity>
-            <View style={styles.profileSection}>
-              <TouchableOpacity style={styles.profileButton}>
-                <MaterialIcons name="search" size={24} color="#ffffffff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.notificationButton}>
-                <MaterialIcons name="notifications" size={22} color="#fff" />
-                <View style={styles.notificationDot} />
-              </TouchableOpacity>
-            </View>
-          </View>
-          <View style={styles.welcomeSection}>
-            <Text style={styles.welcomeText}>Bem-vindo</Text>
-            <Text style={styles.userName}>{user}</Text>
-          </View>
-
-
-        </LinearGradient>
-
-        {/* Destaques (Carrossel) */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Em Destaque</Text>
-            <TouchableOpacity>
-
-            </TouchableOpacity>
-          </View>
-
-          <FlatList
-            data={featuredContent}
-            renderItem={renderFeaturedItem}
-            keyExtractor={item => item.stream_id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            pagingEnabled
-            snapToInterval={screenWidth}
-            decelerationRate="fast"
-            contentContainerStyle={styles.featuredContainer}
-          />
-        </View>
-
-        {/* Continue Assistindo 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Continue Assistindo</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>Histórico</Text>
-            </TouchableOpacity>
-          </View>
-
-          <FlatList
-            data={continueWatching}
-            renderItem={renderContinueCard}
-            keyExtractor={item => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.continueContainer}
-          />
-        </View>
-        */}
-
-        {/* Filmes Populares */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Filmes</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>Ver todos</Text>
-            </TouchableOpacity>
-          </View>
-
-          <FlatList
-            data={popularMovies}
-            renderItem={renderMovieCard}
-            keyExtractor={item => item.stream_id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            onEndReached={GetStreamList}
-            onEndReachedThreshold={0.1}
-            initialNumToRender={5}
-            maxToRenderPerBatch={10}
-            removeClippedSubviews={true}
-            contentContainerStyle={styles.moviesContainer}
-          />
-        </View>
-
-        {/* Séries em Destaque */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Séries</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>Ver todas</Text>
-            </TouchableOpacity>
-          </View>
-
-          <FlatList
-            data={featuredSeries}
-            renderItem={renderSeriesCard}
-            keyExtractor={item => item.series_id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.seriesContainer}
-          />
-        </View>
-
-        {/* Canais ao Vivo */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Canais ao Vivo</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>Grade completa</Text>
-            </TouchableOpacity>
-          </View>
-
-          <FlatList
-            data={liveChannels}
-            renderItem={renderChannelCard}
-            keyExtractor={item => item.category_id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.channelsContainer}
-          />
-        </View>
-
-        {/* Recomendados para Você */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recomendados para Você</Text>
-          </View>
-
-          <View style={styles.recommendedGrid}>
-            {popularMovies.slice(50, 54).map((movie: any) => (
-              <TouchableOpacity
-                key={movie.stream_id}
-                style={styles.recommendedCard}
-              >
-                <Image
-                  source={{ uri: movie.stream_icon || movie.cover }}
-                  style={styles.recommendedImage}
-                  cachePolicy='disk'
-                />
-                <Text style={styles.recommendedTitle} numberOfLines={1}>
-                  {movie.title}
-                </Text>
-                <Text style={styles.recommendedMeta}>
-                  {movie.release_date} • {movie.duration}
-                </Text>
-              </TouchableOpacity>
-            ))}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.kicker}>Sua sala de cinema</Text>
+            <Text style={styles.title}>Inicio</Text>
+            <Text style={styles.userName}>{userName}</Text>
           </View>
         </View>
 
-        {/* Rodapé */}
-        <View style={styles.footer}>
-          <Text style={styles.footerTitle}>AS IPTV Premium</Text>
-          <Text style={styles.footerText}>
-            Tenha recursos de download e muito mais
-          </Text>
-          <TouchableOpacity style={styles.upgradeButton}>
-            <Text style={styles.upgradeText}>FAZER UPGRADE</Text>
-            <MaterialIcons name="arrow-forward" size={20} color="#fff" />
+        {isFree ? (
+          <TouchableOpacity
+            style={styles.upgradeBanner}
+            onPress={() => router.push('/assinar')}
+            activeOpacity={0.85}
+          >
+            <MaterialIcons name="workspace-premium" size={15} color="#FF8F3A" />
+            <Text style={styles.upgradeBannerText}>
+              Desbloqueie Explorar, Downloads, Listas e muito mais
+            </Text>
+            <MaterialIcons name="chevron-right" size={16} color="#FF8F3A" />
           </TouchableOpacity>
-        </View>
-      </ScrollView>
+        ) : (
+          <Animated.View
+            style={[
+              styles.contextBanner,
+              { backgroundColor: animatedBannerBackground, borderColor: animatedBannerBorder },
+            ]}
+          >
+            <Animated.View
+              style={[
+                styles.contextBannerContent,
+                {
+                  opacity: bannerContentTransition,
+                  transform: [{ translateY: animatedBannerContentY }],
+                },
+              ]}
+            >
+              <MaterialIcons name={contextualNudge.icon} size={14} color={contextualNudge.tint} />
+              <Text style={styles.contextBannerText}>{contextualNudge.message}</Text>
+            </Animated.View>
+          </Animated.View>
+        )}
 
-      {/* Player Flutuante (se algo estiver em reprodução)
-            <TouchableOpacity style={styles.floatingPlayer}>
-              <View style={styles.playerInfo}>
-                <MaterialIcons name="play-arrow" size={20} color="#fff" />
-                <View style={styles.playerDetails}>
-                  <Text style={styles.playerTitle} numberOfLines={1}>Venom: O Último Ciclo</Text>
-                  <Text style={styles.playerSubtitle}>45:20 / 2:18:00</Text>
+        <View style={styles.searchWrap}>
+          <MaterialIcons name="search" size={18} color={StreamingTheme.colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            value={homeSearch}
+            onChangeText={setHomeSearch}
+            placeholder="Buscar filme, serie ou canal"
+            placeholderTextColor={StreamingTheme.colors.textMuted}
+          />
+        </View>
+
+        {searchResults.length > 0 && (
+          <>
+            <Section title="Resultados da busca" action="Limpar" onPress={() => setHomeSearch('')} />
+            <View style={styles.searchResultsWrap}>
+              {searchResults.map((item) => (
+                <TouchableOpacity key={item.id} style={styles.searchResultCard} onPress={() => openSearchResult(item)}>
+                  {hideImages ? (
+                    <View style={[styles.searchResultImage, styles.hiddenImageWrap]}>
+                      <MaterialIcons name="image-not-supported" size={18} color={StreamingTheme.colors.textMuted} />
+                    </View>
+                  ) : (
+                    <Image source={{ uri: item.image }} style={styles.searchResultImage} cachePolicy="disk" />
+                  )}
+                  <View style={styles.searchResultMain}>
+                    <Text style={styles.searchResultTitle} numberOfLines={1}>{item.title}</Text>
+                    <Text style={styles.searchResultSub}>{item.subtitle}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+        <Section title="Em destaque" action="Ver todos" onPress={() => router.navigate('/destaques' as any)} />
+        <FlatList
+          ref={featuredListRef}
+          horizontal
+          removeClippedSubviews
+          initialNumToRender={3}
+          maxToRenderPerBatch={3}
+          windowSize={4}
+          updateCellsBatchingPeriod={40}
+          pagingEnabled
+          decelerationRate="fast"
+          snapToAlignment="center"
+          data={displayFeaturedItems}
+          renderItem={({ item }) => (
+            <TouchableOpacity style={styles.heroCard} onPress={() => openFeatured(item)}>
+              {hideImages ? (
+                <View style={[styles.heroImage, styles.hiddenImageWrap]}>
+                  <MaterialIcons name="image-not-supported" size={26} color={StreamingTheme.colors.textMuted} />
                 </View>
+              ) : (
+                <Image
+                  source={{
+                    uri:
+                      item.type === 'movie'
+                        ? movieTmdbMap[toText(item.data.stream_id)]?.backdropUrl || movieTmdbMap[toText(item.data.stream_id)]?.posterUrl || toText(item.data.stream_icon || item.data.cover)
+                        : seriesTmdbMap[toText(item.data.series_id)]?.backdropUrl || seriesTmdbMap[toText(item.data.series_id)]?.posterUrl || toText(item.data.stream_icon || item.data.cover),
+                  }}
+                  style={styles.heroImage}
+                  cachePolicy="disk"
+                />
+              )}
+              <LinearGradient colors={['transparent', 'rgba(0,0,0,0.9)']} style={styles.heroOverlay}>
+                <Text style={styles.heroTitle} numberOfLines={1}>
+                  {sanitizeLabelText(item.data.title || item.data.name, 'Sem titulo')}
+                </Text>
+                <Text style={styles.heroSubtitle} numberOfLines={1}>
+                  {sanitizeLabelText(item.data.plot, item.type === 'series' ? 'Serie em destaque' : 'Filme em destaque')}
+                </Text>
+                {!!tasteProfile && hasFeature('recommendation_algorithm') && (
+                  <RecommendationChip
+                    reason={getReasonLabel(item.data, item.type)}
+                    overlay
+                    numberOfLines={1}
+                    style={styles.reasonChipOverlay}
+                  />
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+          onMomentumScrollEnd={(event) => {
+            const width = 302;
+            const index = Math.round(event.nativeEvent.contentOffset.x / width);
+            setActiveFeaturedIndex(index);
+          }}
+          keyExtractor={(item) => item.id}
+          getItemLayout={(_data, index) => ({ length: 302, offset: 302 * index, index })}
+          onScrollToIndexFailed={(info) => {
+            featuredListRef.current?.scrollToOffset({ offset: info.index * 302, animated: true });
+          }}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.horizontalList}
+        />
+        <View style={styles.dotsRow}>
+          {displayFeaturedItems.map((item, index) => (
+            <View
+              key={`dot-${item.id}`}
+              style={[styles.dot, activeFeaturedIndex === index && styles.dotActive]}
+            />
+          ))}
+        </View>
+
+        {continueWatchingItems.length > 0 && (
+          <>
+            <Section title="Continue Assistindo" action="Ver todos" onPress={() => router.navigate('/continuar-assistindo' as any)} />
+            <FlatList
+              horizontal
+              data={continueWatchingItems}
+              removeClippedSubviews
+              initialNumToRender={4}
+              maxToRenderPerBatch={4}
+              windowSize={4}
+              updateCellsBatchingPeriod={40}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.continueCard} onPress={() => openContinueItem(item)}>
+                  {hideImages ? (
+                    <View style={[styles.continueImage, styles.hiddenImageWrap]}>
+                      <MaterialIcons name="image-not-supported" size={22} color={StreamingTheme.colors.textMuted} />
+                    </View>
+                  ) : (
+                    <Image source={{ uri: item.image }} style={styles.continueImage} cachePolicy="disk" />
+                  )}
+                  <View style={styles.continueProgressTrack}>
+                    <View style={[styles.continueProgressFill, { width: `${item.progress}%` }]} />
+                  </View>
+                  <Text style={styles.continueTitle} numberOfLines={1}>{item.title}</Text>
+                  <Text style={styles.continueSubTitle} numberOfLines={1}>{item.subtitle}</Text>
+                </TouchableOpacity>
+              )}
+              keyExtractor={(item) => item.id}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+            />
+          </>
+        )}
+
+        <Section title="Filmes lancamentos" action="Ver todos" onPress={() => router.navigate('/filmes')} />
+        <FlatList
+          horizontal
+          data={displayPopularMovies}
+          removeClippedSubviews
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={4}
+          updateCellsBatchingPeriod={40}
+          renderItem={({ item }) => (
+            <PosterCard
+              item={item}
+              onPress={() => openMovie(item)}
+              hideImage={hideImages}
+              meta={movieTmdbMap[toText(item.stream_id)]}
+              reason={hasFeature('recommendation_algorithm') ? getReasonLabel(item, 'movie') : ''}
+            />
+          )}
+          keyExtractor={(item, i) => String(item.stream_id ?? `movie-${i}`)}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.horizontalList}
+        />
+
+        <Section title="Series lancamentos" action="Ver todas" onPress={() => router.navigate('/series')} />
+        <FlatList
+          horizontal
+          data={displayFeaturedSeries}
+          removeClippedSubviews
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={4}
+          updateCellsBatchingPeriod={40}
+          renderItem={({ item }) => (
+            <PosterCard
+              item={item}
+              onPress={() => openSeries(item)}
+              hideImage={hideImages}
+              meta={seriesTmdbMap[toText(item.series_id)]}
+              reason={hasFeature('recommendation_algorithm') ? getReasonLabel(item, 'series') : ''}
+            />
+          )}
+          keyExtractor={(item, i) => String(item.series_id ?? `series-${i}`)}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.horizontalList}
+        />
+
+        <Section title="Canais ao vivo" action="Ver todos" onPress={() => router.navigate('/ao-vivo')} />
+        <FlatList
+          horizontal
+          data={displayLiveChannels}
+          removeClippedSubviews
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={4}
+          updateCellsBatchingPeriod={40}
+          renderItem={({ item }) => (
+            <TouchableOpacity style={styles.liveCard} onPress={() => openLive(item)}>
+              <View style={styles.liveLogoWrap}>
+                {hideImages ? (
+                  <View style={styles.hiddenLiveLogo}>
+                    <MaterialIcons name="image-not-supported" size={20} color={StreamingTheme.colors.textMuted} />
+                  </View>
+                ) : (
+                  <Image source={{ uri: toText(item.stream_icon || item.cover) }} style={styles.liveLogo} cachePolicy="disk" />
+                )}
               </View>
-              <TouchableOpacity style={styles.closePlayer}>
-                <MaterialIcons name="close" size={20} color="#fff" />
-              </TouchableOpacity>
-            </TouchableOpacity> */}
+              <Text style={styles.liveTitle} numberOfLines={2}>
+                {sanitizeLabelText(item.name || item.title || item.category_name, 'Canal')}
+              </Text>
+              {!!tasteProfile && hasFeature('recommendation_algorithm') && (
+                <RecommendationChip
+                  reason={getReasonLabel(item, 'live')}
+                  numberOfLines={2}
+                  style={styles.reasonChipLive}
+                />
+              )}
+              <View style={styles.liveTag}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveTagText}>AO VIVO</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          keyExtractor={(item, i) => String(item.stream_id ?? `live-${i}`)}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.horizontalList}
+        />
+
+        <ParentalUnlockModal
+          visible={showUnlockModal}
+          onClose={() => setShowUnlockModal(false)}
+          onConfirm={handleUnlock}
+        />
+
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
+function Section({ title, action, onPress }: { title: string; action: string; onPress: () => void }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <TouchableOpacity onPress={onPress}>
+        <Text style={styles.sectionAction}>{action}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function PosterCard({
+  item,
+  onPress,
+  hideImage,
+  meta,
+  reason,
+}: {
+  item: StreamItem;
+  onPress: () => void;
+  hideImage: boolean;
+  meta?: TmdbMeta;
+  reason?: string;
+}) {
+  return (
+    <TouchableOpacity style={styles.posterCard} onPress={onPress}>
+      {hideImage ? (
+        <View style={[styles.posterImage, styles.hiddenImageWrap]}>
+          <MaterialIcons name="image-not-supported" size={22} color={StreamingTheme.colors.textMuted} />
+        </View>
+      ) : (
+        <Image source={{ uri: meta?.posterUrl || toText(item.stream_icon || item.cover) }} style={styles.posterImage} cachePolicy="disk" />
+      )}
+      <Text style={styles.posterTitle} numberOfLines={1}>
+        {sanitizeLabelText(item.title || item.name, 'Sem titulo')}
+      </Text>
+      <View style={styles.posterMetaRow}>
+        <MaterialIcons name="star" size={12} color={StreamingTheme.colors.warning} />
+        <Text style={styles.posterMeta}>{meta?.rating ? String(meta.rating) : toText(item.rating || item.rating_5based, 'N/A')}</Text>
+        {!!meta?.releaseYear && <Text style={styles.posterMeta}>• {meta.releaseYear}</Text>}
+      </View>
+      {!!reason && <RecommendationChip reason={reason} numberOfLines={2} style={styles.reasonChipPoster} />}
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000000ff',
-  },
-  scrollContainer: {
-    paddingBottom: 100,
-  },
-  fixedHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-  },
-  headerGradient: {
-    paddingTop: StatusBar.currentHeight,
-    paddingBottom: 15,
-  },
-  headerContent: {
+  container: { flex: 1, backgroundColor: StreamingTheme.colors.background },
+  content: { paddingBottom: 120 },
+  header: {
+    paddingHorizontal: 18,
+    paddingTop: 12,
     flexDirection: 'row',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
+  kicker: {
+    color: StreamingTheme.colors.accentAlt,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 4,
   },
-  headerIcons: {
-    flexDirection: 'row',
-  },
-  iconButton: {
-    marginLeft: 20,
-  },
-  mainHeader: {
-    paddingTop: 20,
-    paddingBottom: 25,
-    borderBottomLeftRadius: 25,
-    borderBottomRightRadius: 25,
-  },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 20,
-  },
-  profileSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  profileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  notificationButton: {
-    position: 'relative',
-  },
-  notificationDot: {
-    position: 'absolute',
-    top: -2,
-    right: -2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FF4757',
-  },
-  welcomeSection: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
-  },
-  welcomeText: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.8)',
+  title: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 30,
+    fontWeight: '900',
   },
   userName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 5,
+    color: StreamingTheme.colors.textSecondary,
+    marginTop: 4,
   },
-  searchSection: {
+  searchWrap: {
+    marginTop: 14,
+    marginHorizontal: 18,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    borderRadius: 14,
+    backgroundColor: StreamingTheme.colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  searchBar: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    marginRight: 10,
+    paddingHorizontal: 12,
+    gap: 8,
   },
   searchInput: {
     flex: 1,
-    marginLeft: 10,
-    fontSize: 16,
-    color: '#333',
+    height: 46,
+    color: StreamingTheme.colors.textPrimary,
   },
-  filterButton: {
-    width: 50,
-    height: 50,
+  searchResultsWrap: {
+    paddingHorizontal: 18,
+    gap: 8,
+  },
+  contextBanner: {
+    marginTop: 10,
+    marginHorizontal: 18,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderWidth: 1,
+    minHeight: 40,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  section: {
-    marginTop: 25,
+  contextBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    flex: 1,
+  },
+  contextBannerText: {
+    flex: 1,
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  upgradeBanner: {
+    marginTop: 10,
+    marginHorizontal: 18,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,143,58,0.28)',
+    backgroundColor: 'rgba(255,143,58,0.12)',
+    minHeight: 42,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  upgradeBannerText: {
+    flex: 1,
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  lockBanner: {
+    marginTop: 10,
+    marginHorizontal: 18,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,59,48,0.45)',
+    backgroundColor: 'rgba(255,59,48,0.2)',
+    minHeight: 38,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  lockBannerText: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  hiddenImageWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: StreamingTheme.colors.surface,
+  },
+  searchResultCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: StreamingTheme.colors.surface,
+    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  searchResultImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: StreamingTheme.colors.surfaceAlt,
+  },
+  searchResultMain: {
+    flex: 1,
+  },
+  searchResultTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  searchResultSub: {
+    marginTop: 2,
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 11,
   },
   sectionHeader: {
+    marginTop: 20,
+    marginBottom: 10,
+    paddingHorizontal: 18,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 15,
+    justifyContent: 'space-between',
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#ffffffff',
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 19,
+    fontWeight: '800',
   },
-  seeAllText: {
-    color: '#a70101ff',
-    fontWeight: '600',
+  sectionAction: {
+    color: StreamingTheme.colors.accentAlt,
+    fontWeight: '700',
   },
-  categoriesContainer: {
-    paddingHorizontal: 20,
+  horizontalList: {
+    paddingHorizontal: 18,
+    gap: 12,
   },
-  categoryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1a1a1aff',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
-    marginRight: 10,
-  },
-  categoryButtonActive: {
-    backgroundColor: '#a70101ff',
-  },
-  categoryText: {
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#888',
-    fontWeight: '500',
-  },
-  categoryTextActive: {
-    color: '#fff',
-  },
-  featuredContainer: {
-    paddingHorizontal: 20,
-  },
-  featuredCard: {
-    width: screenWidth - 40,
-    height: CAROUSEL_HEIGHT,
-    borderRadius: 15,
-    marginRight: 20,
+  heroCard: {
+    width: 290,
+    height: 160,
+    borderRadius: 18,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
   },
-  featuredImage: {
-    width: '100%',
-    height: '100%',
+  dotsRow: {
+    marginTop: 8,
+    marginBottom: 2,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
   },
-  featuredGradient: {
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+  },
+  dotActive: {
+    width: 16,
+    backgroundColor: StreamingTheme.colors.accentAlt,
+  },
+  heroImage: { width: '100%', height: '100%' },
+  heroOverlay: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    height: '70%',
-    justifyContent: 'flex-end',
-    padding: 20,
-  },
-  featuredInfo: {
-    marginTop: 10,
-  },
-  ratingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 15,
-    marginBottom: 10,
-  },
-  ratingText: {
-    color: '#FFD700',
-    fontWeight: 'bold',
-    marginLeft: 5,
-  },
-  featuredTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
-  },
-  featuredDesc: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    marginBottom: 10,
-  },
-  featuredMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  metaText: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.7)',
-  },
-  metaDot: {
-    color: 'rgba(255,255,255,0.7)',
-    marginHorizontal: 8,
-  },
-  playButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#a70101ff',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 25,
-    paddingVertical: 12,
-    borderRadius: 25,
-  },
-  playText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  moviesContainer: {
-    paddingHorizontal: 20,
-  },
-  movieCard: {
-    width: POSTER_WIDTH,
-    marginRight: 15,
-  },
-  posterImage: {
-    width: POSTER_WIDTH,
-    height: POSTER_HEIGHT,
-    borderRadius: 10,
-    backgroundColor: '#333',
-  },
-  qualityBadge: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    backgroundColor: '#a70101ff',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 5,
-  },
-  qualityText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  movieInfo: {
-    marginTop: 10,
-  },
-  movieTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 5,
-  },
-  movieMeta: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 5,
-  },
-  movieYear: {
-    fontSize: 12,
-    color: '#888',
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  movieRating: {
-    fontSize: 12,
-    color: '#FFD700',
-    marginLeft: 3,
-  },
-  movieDuration: {
-    fontSize: 12,
-    color: '#888',
-  },
-  continueContainer: {
-    paddingHorizontal: 20,
-  },
-  continueCard: {
-    width: 160,
-    marginRight: 15,
-    backgroundColor: '#1a1a1aff',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  continuePoster: {
-    width: '100%',
-    height: 100,
-    position: 'relative',
-  },
-  continueImage: {
-    width: '100%',
-    height: '100%',
-  },
-  progressBar: {
-    position: 'absolute',
     bottom: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#a70101ff',
-  },
-  continueInfo: {
     padding: 12,
   },
-  continueTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
+  heroTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '800',
   },
-  continueSeason: {
+  heroSubtitle: {
+    color: StreamingTheme.colors.textSecondary,
     fontSize: 12,
-    color: '#888',
-    marginBottom: 4,
+    marginTop: 4,
   },
-  continueTime: {
-    fontSize: 11,
-    color: '#a70101ff',
-    marginBottom: 10,
+  reasonChipOverlay: {
+    marginTop: 6,
   },
-  resumeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#a70101ff',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 15,
-    paddingVertical: 6,
-    borderRadius: 15,
+  posterCard: {
+    width: 124,
   },
-  resumeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 5,
-  },
-  seriesContainer: {
-    paddingHorizontal: 20,
-  },
-  seriesCard: {
-    width: 140,
-    marginRight: 15,
-  },
-  seriesPoster: {
-    width: 140,
-    height: 200,
-    borderRadius: 10,
-    backgroundColor: '#333',
-  },
-  seriesInfo: {
-    marginTop: 10,
-  },
-  seriesRating: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
+  posterImage: {
+    width: 124,
+    height: 184,
+    borderRadius: 12,
+    backgroundColor: StreamingTheme.colors.surface,
     marginBottom: 8,
   },
-  seriesRatingText: {
-    color: '#FFD700',
+  posterTitle: {
+    color: StreamingTheme.colors.textPrimary,
     fontSize: 12,
-    fontWeight: 'bold',
-    marginLeft: 3,
+    fontWeight: '700',
   },
-  seriesTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  seriesSeason: {
-    fontSize: 12,
-    color: '#888',
-    marginBottom: 2,
-  },
-  seriesEpisodes: {
-    fontSize: 11,
-    color: '#a70101ff',
-  },
-  channelsContainer: {
-    paddingHorizontal: 20,
-  },
-  channelCard: {
-    width: 120,
-    height: 150,
-    backgroundColor: '#1a1a1aff',
-    borderRadius: 15,
-    alignItems: 'center',
-    padding: 20,
-    marginRight: 15,
-  },
-  channelLogo: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#a70101ff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 15,
-    position: 'relative',
-  },
-  liveBadge: {
-    position: 'absolute',
-    top: -5,
-    right: -5,
+  posterMetaRow: {
+    marginTop: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FF4757',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    gap: 4,
+  },
+  posterMeta: {
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 11,
+  },
+  reasonChipPoster: {
+    marginTop: 4,
+  },
+  continueCard: {
+    width: 148,
+  },
+  continueImage: {
+    width: 148,
+    height: 96,
+    borderRadius: 12,
+    backgroundColor: StreamingTheme.colors.surface,
+    marginBottom: 8,
+  },
+  continueProgressTrack: {
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  continueProgressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: StreamingTheme.colors.accent,
+  },
+  continueTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  continueSubTitle: {
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  liveCard: {
+    width: 170,
+    minHeight: 160,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: StreamingTheme.colors.surfaceAlt,
+    padding: 12,
+    justifyContent: 'space-between',
+  },
+  liveLogoWrap: {
+    height: 54,
     borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  liveLogo: {
+    width: '80%',
+    height: '70%',
+  },
+  hiddenLiveLogo: {
+    width: '80%',
+    height: '70%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liveTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '700',
+    fontSize: 14,
+    minHeight: 34,
+  },
+  reasonChipLive: {
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  liveTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    backgroundColor: 'rgba(255,59,48,0.2)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   liveDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#fff',
-    marginRight: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: StreamingTheme.colors.accent,
   },
-  liveText: {
-    color: '#fff',
-    fontSize: 8,
-    fontWeight: 'bold',
-  },
-  channelName: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 5,
-  },
-  channelCategory: {
-    fontSize: 12,
-    color: '#888',
-    marginBottom: 10,
-  },
-  viewersContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  viewersText: {
-    fontSize: 11,
-    color: '#888',
-    marginLeft: 3,
-  },
-  recommendedGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 20,
-    justifyContent: 'space-between',
-  },
-  recommendedCard: {
-    width: (screenWidth - 50) / 2,
-    marginBottom: 20,
-  },
-  recommendedImage: {
-    width: '100%',
-    height: 120,
-    borderRadius: 10,
-    backgroundColor: '#333',
-    marginBottom: 10,
-  },
-  recommendedTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  recommendedMeta: {
-    fontSize: 12,
-    color: '#888',
-  },
-  footer: {
-    marginTop: 30,
-    marginHorizontal: 20,
-    backgroundColor: '#1a1a1aff',
-    borderRadius: 15,
-    padding: 25,
-    alignItems: 'center',
-  },
-  footerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 10,
-  },
-  footerText: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  upgradeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#a70101ff',
-    paddingHorizontal: 30,
-    paddingVertical: 15,
-    borderRadius: 25,
-  },
-  upgradeText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    marginRight: 10,
-  },
-  floatingPlayer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(167, 1, 1, 0.9)',
-    borderRadius: 15,
-    padding: 15,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
-  },
-  playerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  playerDetails: {
-    marginLeft: 10,
-    flex: 1,
-  },
-  playerTitle: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  playerSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
-  },
-  closePlayer: {
-    padding: 5,
+  liveTagText: {
+    color: StreamingTheme.colors.textPrimary,
+    fontWeight: '800',
+    fontSize: 10,
   },
 });

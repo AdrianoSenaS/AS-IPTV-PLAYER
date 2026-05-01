@@ -1,4 +1,5 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { setDbValue } from '@/services/local-db';
+import { syncServerFromLogin } from '@/services/account-settings';
 
 export const LoginUserStream = async (username:any, user: any, password: any, url: any) => {
     try {
@@ -12,12 +13,29 @@ export const LoginUserStream = async (username:any, user: any, password: any, ur
         const serverInfo = data.server_info;
 
         if (userInfo.status === "Active") {
-            AsyncStorage.setItem('name', username)
-            AsyncStorage.setItem('username', user)
-            AsyncStorage.setItem('password', password),
-            AsyncStorage.setItem('url', url)
-            AsyncStorage.setItem('userInfo', JSON.stringify(userInfo))
-            AsyncStorage.setItem('serverInfo', JSON.stringify(serverInfo))
+            await Promise.all([
+                setDbValue('name', username),
+                setDbValue('username', user),
+                setDbValue('password', password),
+                setDbValue('url', url),
+                setDbValue('userInfo', JSON.stringify(userInfo)),
+                setDbValue('serverInfo', JSON.stringify(serverInfo)),
+                setDbValue('session.server.credentials.v1', {
+                    name: username,
+                    username: user,
+                    password,
+                    url,
+                    userInfo,
+                    serverInfo,
+                    savedAt: new Date().toISOString(),
+                }),
+            ]);
+            await syncServerFromLogin({
+                displayName: username,
+                url,
+                username: user,
+                password,
+            })
             return "Ok"
         }
 
