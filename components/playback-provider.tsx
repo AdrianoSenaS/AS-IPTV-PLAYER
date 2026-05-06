@@ -15,9 +15,14 @@ const PlaybackContext = createContext<PlaybackContextValue | null>(null);
 
 export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [sourceUrl, setSourceUrl] = useState('');
-  const [isReady, setIsReady] = useState(Platform.OS !== 'android');
+  const [isReady, setIsReady] = useState(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevAppStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const backgroundSinceRef = useRef(0);
+  // Em alguns aparelhos Android, desmontar/remontar o player ao voltar de background
+  // causa referencias nativas invalidadas (shared object released). Mantemos o mesmo
+  // player vivo para estabilidade.
+  const PLAYER_RESET_AFTER_BG_MS = Number.POSITIVE_INFINITY;
 
   const scheduleReady = (delay = 350) => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -33,12 +38,26 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const prev = prevAppStateRef.current;
       prevAppStateRef.current = state;
 
-      // Ao voltar de background real, a Activity pode ter sido recriada.
-      // Resetamos o player para evitar referência a Activity destruída.
+      if (state === 'background') {
+        backgroundSinceRef.current = Date.now();
+        return;
+      }
+
+      if (state === 'inactive') {
+        // Estado transitorio (PiP, notificacoes, crop nativo): nao registra background.
+        return;
+      }
+
+      // Mantemos o player vivo ao voltar para active; recriar player tem causado
+      // PlaybackException em alguns dispositivos.
       if (state === 'active' && prev === 'background') {
-        if (timerRef.current) clearTimeout(timerRef.current);
-        setIsReady(false);
-        scheduleReady(350);
+        const bgDuration =
+          backgroundSinceRef.current > 0 ? Date.now() - backgroundSinceRef.current : 0;
+        backgroundSinceRef.current = 0;
+
+        if (bgDuration < PLAYER_RESET_AFTER_BG_MS) {
+          return;
+        }
       }
     });
 

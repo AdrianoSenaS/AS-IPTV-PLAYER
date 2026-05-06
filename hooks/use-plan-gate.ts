@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Feature, getActivePlan, Plan } from '@/services/subscription';
+import { Feature, getActivePlan, getAvailablePlans, Plan, subscribeToPlanChanges } from '@/services/subscription';
 
 /**
  * Hook que retorna o plano ativo e um helper para verificar features.
@@ -9,7 +9,17 @@ export function usePlanGate() {
   const [plan, setPlan] = useState<Plan | null>(null);
 
   useEffect(() => {
-    getActivePlan().then(setPlan);
+    getAvailablePlans(true)
+      .catch(() => null)
+      .finally(() => {
+        getActivePlan().then(setPlan);
+      });
+
+    const unsubscribe = subscribeToPlanChanges((nextPlan) => {
+      setPlan(nextPlan);
+    });
+
+    return unsubscribe;
   }, []);
 
   const hasFeature = (feature: Feature): boolean => {

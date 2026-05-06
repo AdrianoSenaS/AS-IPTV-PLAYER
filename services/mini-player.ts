@@ -20,8 +20,16 @@ const notify = () => {
 
 export const getMiniPlayerState = () => currentMiniPlayerState;
 
-export const setMiniPlayerState = (nextState: MiniPlayerState) => {
-  currentMiniPlayerState = nextState;
+export const setMiniPlayerState = (
+  nextState:
+    | MiniPlayerState
+    | null
+    | ((prevState: MiniPlayerState | null) => MiniPlayerState | null)
+) => {
+  currentMiniPlayerState =
+    typeof nextState === 'function'
+      ? (nextState as (prevState: MiniPlayerState | null) => MiniPlayerState | null)(currentMiniPlayerState)
+      : nextState;
   notify();
 };
 

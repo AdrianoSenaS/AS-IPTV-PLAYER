@@ -8,6 +8,9 @@ type Credentials = {
   password: string;
 };
 
+const normalizeBaseUrl = (value: string) => String(value || '').trim().replace(/\/+$/, '');
+const encodePathPart = (value: string) => encodeURIComponent(String(value || '').trim());
+
 async function loadCredentials(): Promise<Credentials | null> {
   const [url, username, password] = await Promise.all([
     getDbValue<string>('url'),
@@ -19,7 +22,11 @@ async function loadCredentials(): Promise<Credentials | null> {
     return null;
   }
 
-  return { url, username, password };
+  return {
+    url: normalizeBaseUrl(url),
+    username,
+    password,
+  };
 }
 
 export async function buildMovieUrl(item: StreamItem): Promise<string | null> {
@@ -34,8 +41,11 @@ export async function buildMovieUrl(item: StreamItem): Promise<string | null> {
     return null;
   }
 
-  const ext = toText((item as any).container_extension, 'mp4');
-  return `${creds.url}/movie/${creds.username}/${creds.password}/${streamId}.${ext}`;
+  const preferredExt = toText((item as any).container_extension, '').toLowerCase();
+  const extCandidates = [preferredExt, 'mp4', 'mkv', 'ts', 'm3u8'].filter(Boolean);
+  const ext = extCandidates[0] || 'mp4';
+
+  return `${creds.url}/movie/${encodePathPart(creds.username)}/${encodePathPart(creds.password)}/${encodePathPart(streamId)}.${ext}`;
 }
 
 export async function buildLiveUrl(item: StreamItem): Promise<string | null> {
@@ -52,7 +62,7 @@ export async function buildLiveUrl(item: StreamItem): Promise<string | null> {
 
   // Muitos paineis Xtream expõem live em .m3u8; caimos para .ts por fallback no player.
   const ext = toText((item as any).container_extension, 'm3u8');
-  return `${creds.url}/live/${creds.username}/${creds.password}/${streamId}.${ext}`;
+  return `${creds.url}/live/${encodePathPart(creds.username)}/${encodePathPart(creds.password)}/${encodePathPart(streamId)}.${ext}`;
 }
 
 export async function buildSeriesEpisodeUrl(episodeId: string, ext = 'mp4'): Promise<string | null> {
@@ -65,5 +75,5 @@ export async function buildSeriesEpisodeUrl(episodeId: string, ext = 'mp4'): Pro
     return null;
   }
 
-  return `${creds.url}/series/${creds.username}/${creds.password}/${episodeId}.${ext}`;
+  return `${creds.url}/series/${encodePathPart(creds.username)}/${encodePathPart(creds.password)}/${encodePathPart(episodeId)}.${ext}`;
 }

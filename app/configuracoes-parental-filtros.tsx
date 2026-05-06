@@ -1,9 +1,11 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  InteractionManager,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -34,6 +36,9 @@ type ContentItem = {
   kind: 'filme' | 'serie' | 'tv';
 };
 
+const CONTENT_INDEX_LIMIT = 1200;
+const CATEGORY_RENDER_LIMIT = 220;
+
 export default function ConfiguracoesParentalFiltrosScreen() {
   const router = useRouter();
   const { hasFeature, loading: planLoading } = usePlanGate();
@@ -49,15 +54,58 @@ export default function ConfiguracoesParentalFiltrosScreen() {
   const [blockedCategoryIds, setBlockedCategoryIds] = useState<string[]>([]);
   const [blockedCategoryNames, setBlockedCategoryNames] = useState<string[]>([]);
   const [blockedContentTitles, setBlockedContentTitles] = useState<string[]>([]);
-  const firstHydrationDone = useMemo(() => categories.length > 0 || contents.length > 0, [categories.length, contents.length]);
+  const blockedCategoryIdsRef = useRef<string[]>([]);
+  const blockedCategoryNamesRef = useRef<string[]>([]);
+  const blockedContentTitlesRef = useRef<string[]>([]);
+  const autoSaveTimerRef = useRef<any>(null);
+  const mountedRef = useRef(true);
   const parentalLocked = !planLoading && !hasFeature('parental_controls');
 
-  if (parentalLocked) {
-    return <FeatureGate feature="parental_controls" locked>{null}</FeatureGate>;
-  }
+  useEffect(() => {
+    blockedCategoryIdsRef.current = blockedCategoryIds;
+  }, [blockedCategoryIds]);
+
+  useEffect(() => {
+    blockedCategoryNamesRef.current = blockedCategoryNames;
+  }, [blockedCategoryNames]);
+
+  useEffect(() => {
+    blockedContentTitlesRef.current = blockedContentTitles;
+  }, [blockedContentTitles]);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      // Flush final ao sair da tela para não perder marcações recentes.
+      void updateParentalSettings({
+        blockedCategoryIds: blockedCategoryIdsRef.current,
+        blockedCategoryNames: blockedCategoryNamesRef.current,
+        blockedContentTitles: blockedContentTitlesRef.current,
+      }).catch(() => null);
+    };
+  }, []);
+
+  const scheduleAutoSave = useCallback((next: {
+    blockedCategoryIds: string[];
+    blockedCategoryNames: string[];
+    blockedContentTitles: string[];
+  }) => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = null;
+      void updateParentalSettings(next).catch(() => null);
+    }, 500);
+  }, []);
 
   const hydrate = useCallback(async () => {
-    if (!firstHydrationDone) {
+    if (!categories.length && !contents.length) {
       setIsLoading(true);
     }
     try {
@@ -81,21 +129,29 @@ export default function ConfiguracoesParentalFiltrosScreen() {
       });
 
       const contentMap = new Map<string, ContentItem>();
-      catalog.vod.forEach((item) => {
+      const appendContent = (item: any, kind: 'filme' | 'serie' | 'tv', rawId: any) => {
+        if (contentMap.size >= CONTENT_INDEX_LIMIT) return;
         const title = sanitizeLabelText(item.title || item.name, '');
         if (!title) return;
-        contentMap.set(`filme-${title.toLowerCase()}`, { id: toText(item.stream_id || title), title, kind: 'filme' });
-      });
-      catalog.series.forEach((item) => {
-        const title = sanitizeLabelText(item.title || item.name, '');
-        if (!title) return;
-        contentMap.set(`serie-${title.toLowerCase()}`, { id: toText(item.series_id || title), title, kind: 'serie' });
-      });
-      catalog.liveStreams.forEach((item) => {
-        const title = sanitizeLabelText(item.title || item.name, '');
-        if (!title) return;
-        contentMap.set(`tv-${title.toLowerCase()}`, { id: toText(item.stream_id || title), title, kind: 'tv' });
-      });
+        contentMap.set(`${kind}-${title.toLowerCase()}`, { id: toText(rawId || title), title, kind });
+      };
+
+      for (const item of catalog.vod) {
+        appendContent(item, 'filme', item.stream_id);
+        if (contentMap.size >= CONTENT_INDEX_LIMIT) break;
+      }
+      if (contentMap.size < CONTENT_INDEX_LIMIT) {
+        for (const item of catalog.series) {
+          appendContent(item, 'serie', item.series_id);
+          if (contentMap.size >= CONTENT_INDEX_LIMIT) break;
+        }
+      }
+      if (contentMap.size < CONTENT_INDEX_LIMIT) {
+        for (const item of catalog.liveStreams) {
+          appendContent(item, 'tv', item.stream_id);
+          if (contentMap.size >= CONTENT_INDEX_LIMIT) break;
+        }
+      }
 
       setCategories(Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name)));
       setContents(Array.from(contentMap.values()).sort((a, b) => a.title.localeCompare(b.title)).slice(0, 1000));
@@ -106,18 +162,24 @@ export default function ConfiguracoesParentalFiltrosScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [firstHydrationDone]);
+  }, [categories.length, contents.length]);
 
   useFocusEffect(
     useCallback(() => {
-      hydrate();
-    }, [hydrate])
+      if (parentalLocked) {
+        return () => {};
+      }
+      const task = InteractionManager.runAfterInteractions(() => {
+        void hydrate();
+      });
+      return () => task.cancel();
+    }, [hydrate, parentalLocked])
   );
 
   const filteredCategories = useMemo(() => {
     const q = categorySearch.trim().toLowerCase();
-    if (!q) return categories;
-    return categories.filter((item) => item.name.toLowerCase().includes(q) || item.kind.includes(q));
+    if (!q) return categories.slice(0, CATEGORY_RENDER_LIMIT);
+    return categories.filter((item) => item.name.toLowerCase().includes(q) || item.kind.includes(q)).slice(0, CATEGORY_RENDER_LIMIT);
   }, [categories, categorySearch]);
 
   const filteredContents = useMemo(() => {
@@ -138,6 +200,14 @@ export default function ConfiguracoesParentalFiltrosScreen() {
 
     setBlockedCategoryIds(nextId);
     setBlockedCategoryNames(nextNames);
+
+    blockedCategoryIdsRef.current = nextId;
+    blockedCategoryNamesRef.current = nextNames;
+    scheduleAutoSave({
+      blockedCategoryIds: nextId,
+      blockedCategoryNames: nextNames,
+      blockedContentTitles: blockedContentTitlesRef.current,
+    });
   };
 
   const toggleContent = (item: ContentItem) => {
@@ -146,28 +216,40 @@ export default function ConfiguracoesParentalFiltrosScreen() {
       ? blockedContentTitles.filter((title) => title !== normalized)
       : [...blockedContentTitles, normalized];
     setBlockedContentTitles(next);
+
+    blockedContentTitlesRef.current = next;
+    scheduleAutoSave({
+      blockedCategoryIds: blockedCategoryIdsRef.current,
+      blockedCategoryNames: blockedCategoryNamesRef.current,
+      blockedContentTitles: next,
+    });
   };
 
   const onSave = async () => {
     try {
       setIsSaving(true);
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
       await updateParentalSettings({
-        blockedCategoryIds,
-        blockedCategoryNames,
-        blockedContentTitles,
+        blockedCategoryIds: blockedCategoryIdsRef.current,
+        blockedCategoryNames: blockedCategoryNamesRef.current,
+        blockedContentTitles: blockedContentTitlesRef.current,
       });
-      Alert.alert('Filtro parental', 'Bloqueios por categoria e conteudo salvos.');
+      Alert.alert('Filtro parental', 'Bloqueios por categoria e conteúdo salvos.');
       router.back();
     } catch (error: any) {
-      Alert.alert('Erro', String(error?.message || error || 'Nao foi possivel salvar.'));
+      Alert.alert('Erro', String(error?.message || error || 'Não foi possível salvar.'));
     } finally {
       setIsSaving(false);
     }
   };
 
-  const countText = `Categorias bloqueadas: ${blockedCategoryIds.length} • Conteudos bloqueados: ${blockedContentTitles.length}`;
+  const countText = `Categorias bloqueadas: ${blockedCategoryIds.length} • Conteúdos bloqueados: ${blockedContentTitles.length}`;
 
   return (
+    <FeatureGate feature="parental_controls" locked={parentalLocked}>
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <AppBackdrop blurIntensity={28} />
@@ -238,6 +320,7 @@ export default function ConfiguracoesParentalFiltrosScreen() {
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
+    </FeatureGate>
   );
 }
 

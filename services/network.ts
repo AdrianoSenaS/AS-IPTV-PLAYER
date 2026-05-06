@@ -1,3 +1,5 @@
+import { CONNECTIVITY_PROBE_URL } from '@/services/api-config';
+
 const CONNECTIVITY_CACHE_TTL_MS = 12_000;
 const REQUEST_TIMEOUT_MS = 1_800;
 
@@ -13,7 +15,7 @@ export async function hasInternetConnection() {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    const response = await fetch('https://clients3.google.com/generate_204', {
+    const response = await fetch(CONNECTIVITY_PROBE_URL, {
       method: 'GET',
       signal: controller.signal,
       cache: 'no-store',

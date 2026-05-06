@@ -1,6 +1,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { getDbValue } from '@/services/local-db';
-import { Image } from 'expo-image';
+import { Image } from 'expo-image';
+
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -28,7 +29,8 @@ import {
   loadCachedContentDetails,
   saveCachedContentDetails,
 } from '@/services/content-details-cache';
-import { downloadEntireSeries, downloadSeriesEpisode } from '@/services/downloads';
+import { downloadEntireSeries, downloadSeriesEpisode, isItemDownloaded, getDownloadedItemsByContentId, deleteDownloadedItem } from '@/services/downloads';
+import { isItemInAnyList, getItemsInAllLists } from '@/services/user-lists';
 import { getDemoSeriesInfo, isDemoModeEnabled } from '@/services/demo-mode';
 import {
   getEpisodeProgress,
@@ -38,6 +40,7 @@ import {
   updateEpisodeProgress,
 } from '@/services/series-progress';
 import { saveSeriesPlaylist } from '@/services/series-playlist';
+import { coerceDurationMs } from '@/services/media-duration';
 import { recordWatchSignal } from '@/services/taste-recommender';
 import { hasFeature as subscriptionHasFeature } from '@/services/subscription';
 import {
@@ -47,6 +50,8 @@ import {
   TmdbContentDetails,
   TmdbPersonBio,
 } from '@/services/tmdb';
+import { isContentBlocked } from '@/services/realtime-presence';
+import { setGlobalCastState } from '@/services/global-cast-session';
 
 type Episode = {
   seasonNumber: number;
@@ -56,6 +61,7 @@ type Episode = {
   title: string;
   description: string;
   duration: string;
+  durationMs: number;
   image: string;
   releaseDate: string;
 };
@@ -106,11 +112,12 @@ function normalizeEpisodes(payload: SeriesInfoPayload): Episode[] {
         episodeNumber,
         episodeId: String(ep?.id || ep?.episode_id || ''),
         extension: String(ep?.container_extension || 'mp4'),
-        title: ep?.title || `Episodio ${episodeNumber}`,
+        title: ep?.title || `Episódio ${episodeNumber}`,
         description:
           info?.plot ||
-          'Sem descricao detalhada para este episodio no provedor. Toque em assistido para registrar progresso.',
-        duration: info?.duration || info?.duration_secs ? `${info?.duration || Math.round((info?.duration_secs || 0) / 60)} min` : 'Duracao indisponivel',
+          'Sem descrição detalhada para este episódio no provedor. Toque em assistido para registrar progresso.',
+        duration: info?.duration || info?.duration_secs ? `${info?.duration || Math.round((info?.duration_secs || 0) / 60)} min` : 'Duração indisponível',
+        durationMs: coerceDurationMs({ text: info?.duration, seconds: info?.duration_secs }),
         image: info?.movie_image || '',
         releaseDate: info?.releasedate || '-',
       });
@@ -126,11 +133,12 @@ function normalizeEpisodes(payload: SeriesInfoPayload): Episode[] {
 
 export default function SerieDetalheScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ seriesId?: string; title?: string; cover?: string }>();
+  const params = useLocalSearchParams<{ seriesId?: string; title?: string; cover?: string; startPositionMs?: string }>();
   const { hasFeature, loading: planLoading } = usePlanGate();
   const tmdbLocked = !planLoading && !hasFeature('tmdb_details');
   const listLocked = !planLoading && !hasFeature('lists');
   const downloadLocked = !planLoading && !hasFeature('downloads');
+  const castLocked = !planLoading && !hasFeature('cast_mirror');
 
   const [isLoading, setIsLoading] = useState(true);
   const [payload, setPayload] = useState<SeriesInfoPayload>({});
@@ -144,8 +152,13 @@ export default function SerieDetalheScreen() {
   const [selectedActor, setSelectedActor] = useState<TmdbCastMember | null>(null);
   const [selectedActorBio, setSelectedActorBio] = useState<TmdbPersonBio | null>(null);
   const [isLoadingBio, setIsLoadingBio] = useState(false);
+  const [isSeriesDownloaded, setIsSeriesDownloaded] = useState(false);
+  const [isSeriesInList, setIsSeriesInList] = useState(false);
+  const [blockedByParental, setBlockedByParental] = useState(false);
+  const [isCastLoading, setIsCastLoading] = useState(false);
 
   const seriesId = String(params.seriesId || '');
+  const incomingStartPositionMs = Math.max(0, Number(params.startPositionMs || 0) || 0);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -153,6 +166,10 @@ export default function SerieDetalheScreen() {
         router.back();
         return;
       }
+
+      const blocked = await isContentBlocked(seriesId).catch(() => false);
+      setBlockedByParental(blocked);
+      if (blocked) { setIsLoading(false); return; }
 
       const [response, map, cachedDetails] = await Promise.all([
         getSeriesInfo(seriesId),
@@ -204,6 +221,24 @@ export default function SerieDetalheScreen() {
     };
 
     bootstrap();
+  }, [seriesId]);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkStates = async () => {
+      if (!seriesId) return;
+      const downloaded = await isItemDownloaded(seriesId, 'series-episode');
+      const inList = await isItemInAnyList(seriesId, 'series');
+      if (mounted) {
+        setIsSeriesDownloaded(downloaded);
+        setIsSeriesInList(inList);
+      }
+    };
+
+    checkStates();
+    return () => {
+      mounted = false;
+    };
   }, [seriesId]);
 
   const seasons = useMemo(() => {
@@ -259,7 +294,7 @@ export default function SerieDetalheScreen() {
       setDownloadingEpisodeId(episode.episodeId);
       await downloadSeriesEpisode({
         seriesId,
-        seriesTitle: String(params.title || payload.info?.name || 'Serie'),
+        seriesTitle: String(params.title || payload.info?.name || 'Série'),
         image: String(params.cover || payload.info?.cover || ''),
         episodeId: episode.episodeId,
         episodeTitle: episode.title,
@@ -267,15 +302,15 @@ export default function SerieDetalheScreen() {
         episodeNumber: episode.episodeNumber,
         extension: episode.extension,
       });
-      Alert.alert('Download concluido', `O episodio ${episode.title} foi salvo em downloads.`);
+      Alert.alert('Download concluído', `O episódio ${episode.title} foi salvo em downloads.`);
     } catch (error: any) {
-      Alert.alert('Erro ao baixar', String(error?.message || error || 'Nao foi possivel baixar este episodio.'));
+      Alert.alert('Erro ao baixar', String(error?.message || error || 'Não foi possível baixar este episódio.'));
     } finally {
       setDownloadingEpisodeId('');
     }
   };
 
-  const downloadSeries = async () => {
+  const toggleDownloadSeries = async () => {
     if (downloadLocked) {
       router.push({ pathname: '/assinar', params: { feature: 'downloads' } });
       return;
@@ -283,6 +318,19 @@ export default function SerieDetalheScreen() {
 
     try {
       setIsDownloadingFullSeries(true);
+
+      // Se já tem episódios baixados, remove todos
+      if (isSeriesDownloaded) {
+        const items = await getDownloadedItemsByContentId(seriesId, 'series-episode');
+        for (const item of items) {
+          await deleteDownloadedItem(item.id);
+        }
+        setIsSeriesDownloaded(false);
+        Alert.alert('Downloads removidos', 'Os episódios foram removidos da lista de downloads.');
+        return;
+      }
+
+      // Caso contrário, baixa tudo
       await downloadEntireSeries(
         seriesId,
         String(params.title || payload.info?.name || 'Serie'),
@@ -295,9 +343,10 @@ export default function SerieDetalheScreen() {
           extension: episode.extension,
         }))
       );
-      Alert.alert('Serie baixada', 'Todos os episodios disponiveis foram enviados para downloads.');
+      setIsSeriesDownloaded(true);
+      Alert.alert('Série baixada', 'Todos os episódios disponíveis foram enviados para downloads.');
     } catch (error: any) {
-      Alert.alert('Erro ao baixar', String(error?.message || error || 'Nao foi possivel baixar a serie completa.'));
+      Alert.alert('Erro ao baixar', String(error?.message || error || 'Não foi possível baixar a série completa.'));
     } finally {
       setIsDownloadingFullSeries(false);
     }
@@ -314,11 +363,11 @@ export default function SerieDetalheScreen() {
     }
   };
 
-  const seriesTitle = String(params.title || payload.info?.name || 'Serie');
+  const seriesTitle = String(params.title || payload.info?.name || 'Série');
   const seriesCover = String(params.cover || payload.info?.cover || '');
   const seriesGenres = tmdbDetails?.genres?.length
     ? tmdbDetails.genres.join(', ')
-    : String(payload.info?.genre || 'Genero');
+    : String(payload.info?.genre || 'Gênero');
   const seriesRating =
     typeof tmdbDetails?.rating === 'number'
       ? String(tmdbDetails.rating)
@@ -326,9 +375,13 @@ export default function SerieDetalheScreen() {
   const seriesOverview =
     tmdbDetails?.overview ||
     payload.info?.plot ||
-    'Descricao completa nao informada pelo provedor. Use as temporadas abaixo para navegar pelos episodios.';
+    'Descrição completa não informada pelo provedor. Use as temporadas abaixo para navegar pelos episódios.';
 
   const openEpisodePlayer = async (episode: Episode) => {
+    if (blockedByParental) {
+      Alert.alert('Conteúdo bloqueado', 'Esta série está bloqueada no controle parental. Desbloqueie no monitor parental para assistir novamente.');
+      return;
+    }
     const seasonEpisodes = episodes
       .filter((item) => item.seasonNumber === episode.seasonNumber)
       .map((item) => ({
@@ -337,6 +390,7 @@ export default function SerieDetalheScreen() {
         extension: item.extension || 'mp4',
         seasonNumber: item.seasonNumber,
         episodeNumber: item.episodeNumber,
+        durationMs: item.durationMs || 0,
       }))
       .filter((item) => !!item.episodeId);
 
@@ -353,7 +407,7 @@ export default function SerieDetalheScreen() {
       params: {
         mode: 'series',
         seriesId,
-        title: `${String(params.title || payload.info?.name || 'Serie')} - ${episode.title}`,
+        title: `${String(params.title || payload.info?.name || 'Série')} - ${episode.title}`,
         playlistKey,
         playlistIndex: String(index),
         startPositionMs: String(
@@ -363,18 +417,107 @@ export default function SerieDetalheScreen() {
     });
   };
 
+  const requestCastDirectForSeries = async () => {
+    if (!continueEpisode) {
+      Alert.alert('Erro', 'Nenhum episódio selecionado para transmissão');
+      return;
+    }
+    if (castLocked) {
+      router.push({ pathname: '/assinar', params: { feature: 'cast_mirror' } });
+      return;
+    }
+    if (blockedByParental) {
+      Alert.alert('Conteúdo bloqueado', 'Esta série está bloqueada no controle parental. Desbloqueie no monitor parental para assistir novamente.');
+      return;
+    }
+
+    setIsCastLoading(true);
+
+    try {
+      const title = `${String(params.title || payload.info?.name || 'Serie')} - ${continueEpisode.title}`;
+      const seasonEpisodes = episodes
+        .filter((item) => item.seasonNumber === continueEpisode.seasonNumber)
+        .map((item) => ({
+          title: item.title,
+          episodeId: item.episodeId,
+          extension: item.extension || 'mp4',
+          seasonNumber: item.seasonNumber,
+          episodeNumber: item.episodeNumber,
+          durationMs: item.durationMs || 0,
+        }))
+        .filter((item) => !!item.episodeId);
+
+      const playlistKey = `series_playlist_${seriesId}_${continueEpisode.seasonNumber}`;
+      await saveSeriesPlaylist(playlistKey, seasonEpisodes);
+
+      const index = seasonEpisodes.findIndex((item) => item.episodeNumber === continueEpisode.episodeNumber);
+      if (index < 0) {
+        setIsCastLoading(false);
+        Alert.alert('Erro', 'Não foi possível preparar o episódio para transmissão.');
+        return;
+      }
+
+      setGlobalCastState({
+        isActive: true,
+        url: '',
+        title,
+        subtitle: `S${continueEpisode.seasonNumber} E${continueEpisode.episodeNumber}`,
+        mode: 'series',
+        contentId: seriesId,
+        startPositionMs: continueProgress?.positionMs || incomingStartPositionMs || 0,
+      });
+
+      router.navigate({
+        pathname: '/player',
+        params: {
+          mode: 'series',
+          seriesId,
+          title,
+          playlistKey,
+          playlistIndex: String(index),
+          startPositionMs: String(continueProgress?.positionMs || incomingStartPositionMs || 0),
+          castPrep: '1',
+        },
+      });
+
+      setIsCastLoading(false);
+    } catch (error) {
+      console.error('[SerieDetalhe] Erro ao iniciar Cast:', error);
+      Alert.alert('Erro', 'Falha ao iniciar transmissão');
+      setGlobalCastState({ isActive: false, url: '', title: '' });
+      setIsCastLoading(false);
+    }
+  };
+
+  if (blockedByParental) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <AppBackdrop blurIntensity={28} />
+        <View style={styles.emptyStateWrap}>
+          <MaterialIcons name="block" size={42} color="#EF4444" />
+          <Text style={styles.emptyStateTitle}>Conteúdo bloqueado</Text>
+          <Text style={styles.emptyStateDesc}>Esta série foi bloqueada pelos responsáveis e está oculta até ser liberada no controle parental.</Text>
+          <TouchableOpacity style={styles.backPrimaryBtn} onPress={() => router.back()}>
+            <Text style={styles.backPrimaryBtnText}>Voltar</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <AppBackdrop blurIntensity={28} />
-      <PageLoader visible={isLoading} label="Carregando temporada e episodios" />
+      <PageLoader visible={isLoading} label="Carregando temporada e episódios" />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
           <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
             <MaterialIcons name="arrow-back" size={22} color={StreamingTheme.colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Detalhes da serie</Text>
+          <Text style={styles.headerTitle}>Detalhes da série</Text>
           <View style={styles.iconBtn} />
         </View>
 
@@ -395,9 +538,9 @@ export default function SerieDetalheScreen() {
 
         <PlanGateBlur feature="tmdb_details" locked={tmdbLocked} style={styles.detailsCard}>
           <View>
-            <Text style={styles.detailsLine}>Jornadas: {tmdbDetails?.seasons || '-'} temporadas • {tmdbDetails?.episodes || '-'} episodios</Text>
-            <Text style={styles.detailsLine}>Direcao: {tmdbDetails?.director || '-'}</Text>
-            <Text style={styles.detailsLine}>Lancamento: {tmdbDetails?.releaseDate || String(payload.info?.releaseDate || '-')}</Text>
+            <Text style={styles.detailsLine}>Jornadas: {tmdbDetails?.seasons || '-'} temporadas • {tmdbDetails?.episodes || '-'} episódios</Text>
+            <Text style={styles.detailsLine}>Direção: {tmdbDetails?.director || '-'}</Text>
+            <Text style={styles.detailsLine}>Lançamento: {tmdbDetails?.releaseDate || String(payload.info?.releaseDate || '-')}</Text>
           </View>
         </PlanGateBlur>
 
@@ -409,7 +552,7 @@ export default function SerieDetalheScreen() {
               : `S${summary.lastSeason} • E${summary.lastEpisode}`}
           </Text>
           <Text style={styles.resumeStats}>
-            Assistidos: {summary.watchedCount} • Progresso medio: {summary.averageProgress}%
+            Assistidos: {summary.watchedCount} • Progresso médio: {summary.averageProgress}%
           </Text>
           {!!continueProgress?.positionMs && (
             <Text style={styles.resumeStats}>
@@ -428,9 +571,23 @@ export default function SerieDetalheScreen() {
           >
             <MaterialIcons name="play-arrow" size={18} color={StreamingTheme.colors.textPrimary} />
             <Text style={styles.resumeButtonText}>
-              {continueEpisode ? 'Continuar episodio' : 'Abrir temporada atual'}
+              {continueEpisode ? 'Continuar episódio' : 'Abrir temporada atual'}
             </Text>
           </TouchableOpacity>
+
+          {!castLocked && !!continueEpisode && (
+            <TouchableOpacity
+              style={[styles.castBtn, isCastLoading && { opacity: 0.6 }]}
+              onPress={requestCastDirectForSeries}
+              disabled={isCastLoading}>
+              {isCastLoading ? (
+                <ActivityIndicator size="small" color={StreamingTheme.colors.textPrimary} />
+              ) : (
+                <MaterialIcons name="cast" size={18} color={StreamingTheme.colors.textPrimary} />
+              )}
+              <Text style={styles.castText}>{isCastLoading ? 'Conectando...' : 'Espelhar pra TV'}</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[styles.addListBtn, listLocked && styles.ctaLockedBtn]}
@@ -446,20 +603,28 @@ export default function SerieDetalheScreen() {
               size={20}
               color={StreamingTheme.colors.textPrimary}
             />
-            <Text style={styles.addListText}>{listLocked ? 'Listas Premium' : 'Adicionar serie a lista'}</Text>
+            <Text style={styles.addListText}>{listLocked ? 'Listas Premium' : 'Adicionar série à lista'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.downloadSeriesBtn, downloadLocked && styles.ctaLockedBtn]}
-            onPress={downloadSeries}
+            onPress={toggleDownloadSeries}
             disabled={isDownloadingFullSeries && !downloadLocked}>
             <MaterialIcons
-              name={downloadLocked ? 'workspace-premium' : 'download'}
+              name={downloadLocked ? 'workspace-premium' : isSeriesDownloaded ? 'delete-outline' : 'download'}
               size={20}
               color={StreamingTheme.colors.textPrimary}
             />
             <Text style={styles.downloadSeriesText}>
-              {downloadLocked ? 'Download Premium' : isDownloadingFullSeries ? 'Baixando serie...' : 'Baixar serie completa'}
+              {downloadLocked
+                ? 'Download Premium'
+                : isDownloadingFullSeries
+                ? isSeriesDownloaded
+                  ? 'Removendo...'
+                  : 'Baixando série...'
+                : isSeriesDownloaded
+                ? 'Remover downloads'
+                : 'Baixar série completa'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -539,7 +704,7 @@ export default function SerieDetalheScreen() {
                     </View>
 
                     <Text style={styles.episodeMeta}>
-                      {item.duration} • Lancamento: {item.releaseDate}
+                      {item.duration} • Lançamento: {item.releaseDate}
                     </Text>
                     <Text style={styles.episodeDescription}>{item.description}</Text>
 
@@ -551,7 +716,7 @@ export default function SerieDetalheScreen() {
                 </View>
 
                 <View style={styles.actionsRow}>
-                  <ActionButton label="Assistir episodio" strong onPress={() => openEpisodePlayer(item)} />
+                  <ActionButton label="Assistir episódio" strong onPress={() => openEpisodePlayer(item)} />
                   <ActionButton label="25%" onPress={() => setEpisodeProgress(item, 25)} />
                   <ActionButton label="50%" onPress={() => setEpisodeProgress(item, 50)} />
                   <ActionButton label="75%" onPress={() => setEpisodeProgress(item, 75)} />
@@ -572,8 +737,8 @@ export default function SerieDetalheScreen() {
                     {downloadLocked
                       ? 'Download Premium'
                       : downloadingEpisodeId === item.episodeId
-                        ? 'Baixando episodio...'
-                        : 'Baixar episodio'}
+                        ? 'Baixando episódio...'
+                        : 'Baixar episódio'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -589,7 +754,7 @@ export default function SerieDetalheScreen() {
           type: 'series',
           contentId: seriesId,
           title: seriesTitle,
-          subtitle: String(payload.info?.genre || 'Serie'),
+          subtitle: String(payload.info?.genre || 'Série'),
           image: seriesCover,
         }}
       />
@@ -627,7 +792,7 @@ export default function SerieDetalheScreen() {
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.bioContent}>
                 <Text style={styles.bioActorName}>{selectedActorBio?.name || selectedActor?.name}</Text>
                 <Text style={styles.bioMeta}>
-                  {selectedActorBio?.knownForDepartment || selectedActor?.knownForDepartment || 'Atuacao'}
+                  {selectedActorBio?.knownForDepartment || selectedActor?.knownForDepartment || 'Atuação'}
                 </Text>
                 {!!selectedActorBio?.birthday && (
                   <Text style={styles.bioMeta}>Nascimento: {selectedActorBio.birthday}</Text>
@@ -636,7 +801,7 @@ export default function SerieDetalheScreen() {
                   <Text style={styles.bioMeta}>Origem: {selectedActorBio.placeOfBirth}</Text>
                 )}
                 <Text style={styles.bioText}>
-                  {selectedActorBio?.biography || 'Biografia nao informada para este ator.'}
+                  {selectedActorBio?.biography || 'Biografia não informada para este ator.'}
                 </Text>
               </ScrollView>
             )}
@@ -665,6 +830,11 @@ function ActionButton({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: StreamingTheme.colors.background },
+  emptyStateWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, gap: 10 },
+  emptyStateTitle: { color: StreamingTheme.colors.textPrimary, fontSize: 20, fontWeight: '800' },
+  emptyStateDesc: { color: StreamingTheme.colors.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+  backPrimaryBtn: { marginTop: 8, minHeight: 38, borderRadius: 10, backgroundColor: StreamingTheme.colors.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  backPrimaryBtnText: { color: StreamingTheme.colors.textPrimary, fontWeight: '800', fontSize: 13 },
   content: { padding: 16, paddingBottom: 120 },
   headerRow: {
     flexDirection: 'row',
@@ -818,6 +988,23 @@ const styles = StyleSheet.create({
     color: StreamingTheme.colors.textPrimary,
     fontWeight: '700',
     fontSize: 12,
+  },
+  castBtn: {
+    marginTop: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: StreamingTheme.colors.surfaceAlt,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  castText: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '800',
   },
   addListBtn: {
     marginTop: 10,

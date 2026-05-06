@@ -1,4 +1,5 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
@@ -43,10 +44,6 @@ export default function ConfiguracoesParentalScreen() {
   const [lockedKeywords, setLockedKeywords] = useState('');
   const parentalLocked = !planLoading && !hasFeature('parental_controls');
 
-  if (parentalLocked) {
-    return <FeatureGate feature="parental_controls" locked>{null}</FeatureGate>;
-  }
-
   const hydrate = useCallback(async () => {
     if (!state) {
       setIsLoading(true);
@@ -68,7 +65,11 @@ export default function ConfiguracoesParentalScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (parentalLocked) {
+        return () => {};
+      }
       hydrate();
+      return () => {};
     }, [hydrate])
   );
 
@@ -88,9 +89,9 @@ export default function ConfiguracoesParentalScreen() {
         lockedKeywords: keywords,
       });
       setState(next);
-      Alert.alert('Controle dos pais', 'Configuracoes de controle salvas.');
+      Alert.alert('Controle dos pais', 'Configurações de controle salvas.');
     } catch (error: any) {
-      Alert.alert('Erro', String(error?.message || error || 'Nao foi possivel salvar.'));
+      Alert.alert('Erro', String(error?.message || error || 'Não foi possível salvar.'));
     } finally {
       setIsSaving(false);
     }
@@ -106,6 +107,7 @@ export default function ConfiguracoesParentalScreen() {
   }
 
   return (
+    <FeatureGate feature="parental_controls" locked={parentalLocked}>
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <AppBackdrop blurIntensity={28} />
@@ -128,20 +130,20 @@ export default function ConfiguracoesParentalScreen() {
 
           <Field
             label="PIN mestre"
-            placeholder="Minimo 4 digitos"
+            placeholder="Mínimo 4 dígitos"
             value={masterPin}
             onChangeText={(value) => setMasterPin(value.replace(/[^0-9]/g, ''))}
             secureTextEntry
           />
 
           <ToggleRow
-            label="Exigir PIN para configuracoes"
+            label="Exigir PIN para configurações"
             value={settingsPinRequired}
             onValueChange={setSettingsPinRequired}
           />
 
           <ToggleRow
-            label="Exigir PIN para conteudo adulto"
+            label="Exigir PIN para conteúdo adulto"
             value={adultPinRequired}
             onValueChange={setAdultPinRequired}
           />
@@ -154,6 +156,7 @@ export default function ConfiguracoesParentalScreen() {
           />
 
           <ActionButton text="Salvar controle dos pais" icon="shield" onPress={onSave} />
+          <ActionButton text="Abrir monitor parental completo" icon="monitor" onPress={() => router.push('/monitor-parental' as any)} />
           <ActionButton text="Filtros avancados de categoria e conteudo" icon="filter-alt" onPress={() => router.push('/configuracoes-parental-filtros' as any)} tone="muted" />
           <ActionButton text="Gerenciar perfis" icon="groups" onPress={() => router.push('/configuracoes-perfis' as any)} tone="muted" />
         </View>
@@ -176,6 +179,7 @@ export default function ConfiguracoesParentalScreen() {
         pinPlaceholder="PIN mestre"
       />
     </SafeAreaView>
+    </FeatureGate>
   );
 }
 

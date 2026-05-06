@@ -1,7 +1,8 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
+import { Image } from 'expo-image';
+
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -23,6 +24,8 @@ import { ParentalUnlockModal } from '@/components/parental-unlock-modal';
 import { RecommendationChip } from '@/components/recommendation-chip';
 import { StreamingTheme } from '@/constants/streaming-theme';
 import { usePlanGate } from '@/hooks/use-plan-gate';
+import { loadAiSettings } from '@/services/ai-settings';
+import { recordCategoryEvent, recordRankingEvent, recordSearchEvent } from '@/services/behavior-intelligence';
 import {
   AccessSnapshot,
   filterBlockedContent,
@@ -40,15 +43,50 @@ import {
 } from '../services/catalog-data';
 import { DownloadJob, subscribeDownloadJobs } from '@/services/downloads';
 import { getSeriesSummary, loadSeriesProgressMap, SeriesProgressMap } from '@/services/series-progress';
-import { buildUserTasteProfile, getRecommendationReasons, rankContentByTaste, UserTasteProfile } from '@/services/taste-recommender';
+import { buildUserTasteProfile, getCachedTasteProfileSnapshot, getPersistedTasteProfileSnapshot, getRecommendationReasons, rankContentByTaste, shouldRefreshTasteProfile, UserTasteProfile } from '@/services/taste-recommender';
 import { buildTmdbMetadataForCatalog, rankCatalogByTmdb, TmdbMeta } from '@/services/tmdb';
 
 const PAGE_SIZE = 90;
+const PROFILE_BUILD_TIMEOUT_MS = 1800;
+const PROFILE_ITEMS_SAMPLE_LIMIT = 240;
+const PROFILE_BACKGROUND_REFRESH_MS = 1000 * 60 * 60 * 24 * 2;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function resolveSeriesId(item: StreamItem, index = 0) {
+  const raw = toText(item.series_id).trim();
+  if (raw) return raw;
+  return `fallback-${index}-${toText(item.title || item.name, 'sem-id')}`;
+}
+
+function dedupeSeries(input: StreamItem[]) {
+  const seen = new Set<string>();
+  return input.filter((item, index) => {
+    const id = resolveSeriesId(item, index);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
 
 export default function SeriesScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ categoryId?: string }>();
   const { hasFeature, loading: planLoading } = usePlanGate();
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const hasRecommendationAlgorithm = aiEnabled && !planLoading && hasFeature('recommendation_algorithm');
   const [isLoading, setIsLoading] = useState(true);
   const [items, setItems] = useState<StreamItem[]>([]);
   const [categories, setCategories] = useState<StreamItem[]>([]);
@@ -60,11 +98,16 @@ export default function SeriesScreen() {
   const [search, setSearch] = useState('');
   const [access, setAccess] = useState<AccessSnapshot | null>(null);
   const [tasteProfile, setTasteProfile] = useState<UserTasteProfile | null>(null);
+  const [isAlgorithmLoading, setIsAlgorithmLoading] = useState(false);
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isPageLoading, setIsPageLoading] = useState(false);
+  const offsetRef = useRef(0);
+  const hasMoreRef = useRef(true);
+  const isPageLoadingRef = useRef(false);
+  const endReachedLockedByMomentumRef = useRef(true);
 
   const downloadLocked = !planLoading && !hasFeature('downloads');
 
@@ -72,13 +115,41 @@ export default function SeriesScreen() {
     setSelectedCategory(params.categoryId ? String(params.categoryId) : 'all');
   }, [params.categoryId]);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      let mounted = true;
+      void loadAiSettings().then((settings) => {
+        if (!mounted) return;
+        setAiEnabled(settings.enabled);
+      });
+      return () => {
+        mounted = false;
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    if (search.trim().length < 2) return;
+    void recordSearchEvent(search, 'series');
+  }, [search]);
+
+  useEffect(() => {
+    if (!selectedCategory || selectedCategory === 'all') return;
+    void recordCategoryEvent(selectedCategory, 'series');
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    void recordRankingEvent(rankingMode, 'series');
+  }, [rankingMode]);
+
   const loadPage = useCallback(
     async (reset: boolean) => {
-      if (isPageLoading) return;
+      if (isPageLoadingRef.current) return;
 
+      isPageLoadingRef.current = true;
       setIsPageLoading(true);
       try {
-        const nextOffset = reset ? 0 : offset;
+        const nextOffset = reset ? 0 : offsetRef.current;
         const [count, page] = await Promise.all([
           queryCatalogCount({ kind: 'series', categoryId: selectedCategory, search }),
           queryCatalogPage({
@@ -94,23 +165,28 @@ export default function SeriesScreen() {
           setItems([]);
           setTmdbMap({});
           setTotalCount(0);
+          offsetRef.current = 0;
           setOffset(0);
+          hasMoreRef.current = false;
           setHasMore(false);
           return;
         }
 
         if (reset) {
-          setItems(page);
+          setItems(dedupeSeries(page));
           setTmdbMap({});
+          offsetRef.current = page.length;
           setOffset(page.length);
         } else {
-          setItems((prev) => [...prev, ...page]);
-          setOffset((prev) => prev + page.length);
+          setItems((prev) => dedupeSeries([...prev, ...page]));
+          offsetRef.current += page.length;
+          setOffset(offsetRef.current);
         }
 
         setTotalCount(count);
         const loaded = (reset ? 0 : nextOffset) + page.length;
-        setHasMore(loaded < count);
+        hasMoreRef.current = loaded < count;
+        setHasMore(hasMoreRef.current);
 
         if (page.length) {
           const pageTmdbMap = await buildTmdbMetadataForCatalog(
@@ -122,10 +198,11 @@ export default function SeriesScreen() {
           setTmdbMap((prev) => ({ ...prev, ...pageTmdbMap }));
         }
       } finally {
+        isPageLoadingRef.current = false;
         setIsPageLoading(false);
       }
     },
-    [isPageLoading, offset, search, selectedCategory]
+    [search, selectedCategory]
   );
 
   useEffect(() => {
@@ -159,13 +236,56 @@ export default function SeriesScreen() {
         if (mounted) {
           setProgressMap(map);
           setAccess(snapshot);
-          setTasteProfile(
-            await buildUserTasteProfile({
-              settings: snapshot.settings,
-              catalog: { vod: [], series: items, liveStreams: [] },
-              seriesProgressMap: map,
-            })
-          );
+          if (!hasRecommendationAlgorithm) {
+            setTasteProfile(null);
+            setIsAlgorithmLoading(false);
+            return;
+          }
+
+          setIsAlgorithmLoading(true);
+
+          try {
+            const cachedProfile = getCachedTasteProfileSnapshot(snapshot.settings);
+            if (cachedProfile) {
+              setTasteProfile(cachedProfile);
+            }
+
+            const persistedProfile = await getPersistedTasteProfileSnapshot(
+              snapshot.settings,
+              PROFILE_BACKGROUND_REFRESH_MS
+            );
+            if (mounted && persistedProfile) {
+              setTasteProfile(persistedProfile);
+            }
+
+            const shouldRefresh = await shouldRefreshTasteProfile(
+              snapshot.settings,
+              PROFILE_BACKGROUND_REFRESH_MS
+            );
+
+            if (!shouldRefresh) {
+              return;
+            }
+
+            const sampleSeries = items.slice(0, PROFILE_ITEMS_SAMPLE_LIMIT);
+            const nextProfile = await withTimeout(
+              buildUserTasteProfile({
+                settings: snapshot.settings,
+                catalog: { vod: [], series: sampleSeries, liveStreams: [] },
+                seriesProgressMap: map,
+              }),
+              PROFILE_BUILD_TIMEOUT_MS,
+              null
+            );
+
+            if (mounted && nextProfile) {
+              setTasteProfile(nextProfile);
+            }
+          } finally {
+            if (mounted) {
+              setIsAlgorithmLoading(false);
+            }
+          }
         }
       };
 
@@ -174,7 +294,7 @@ export default function SeriesScreen() {
       return () => {
         mounted = false;
       };
-    }, [])
+    }, [items, hasRecommendationAlgorithm])
   );
 
   useEffect(() => {
@@ -214,19 +334,21 @@ export default function SeriesScreen() {
         `${toText(serie.title || serie.name)} ${toText(serie.category_name)} ${toText(serie.genre)} ${toText(serie.plot)}`
     );
 
+    const uniqueItems = dedupeSeries(protectedItems);
+
     if (rankingMode === 'default') {
-      if (!tasteProfile) return protectedItems;
-      return rankContentByTaste(protectedItems, 'series', tasteProfile);
+      if (!hasRecommendationAlgorithm || !tasteProfile) return uniqueItems;
+      return rankContentByTaste(uniqueItems, 'series', tasteProfile);
     }
 
     return rankCatalogByTmdb(
-      protectedItems,
+      uniqueItems,
       tmdbMap,
       (serie) => toText(serie.series_id),
       rankingMode,
-      protectedItems.length
+      uniqueItems.length
     );
-  }, [items, access, rankingMode, tmdbMap, tasteProfile]);
+  }, [items, access, rankingMode, tmdbMap, tasteProfile, hasRecommendationAlgorithm]);
 
   const hideImages = !!access && shouldHideContentImages(access);
 
@@ -250,7 +372,7 @@ export default function SeriesScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <AppBackdrop blurIntensity={28} />
-      <PageLoader visible={isLoading} label="Carregando series" />
+      <PageLoader visible={isLoading || (hasRecommendationAlgorithm && isAlgorithmLoading)} label="Carregando series" />
 
       <View style={styles.header}>
         <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
@@ -281,7 +403,7 @@ export default function SeriesScreen() {
           style={[styles.chip, selectedCategory === 'all' && styles.chipActive]}
           onPress={() => setSelectedCategory('all')}
         >
-          <Text style={[styles.chipText, selectedCategory === 'all' && styles.chipTextActive]}>Todas</Text>
+          <Text style={[styles.chipText, selectedCategory === 'all' && styles.chipTextActive]}>{ hasRecommendationAlgorithm ? 'Sugestao de IA' : 'Relevantes'}</Text>
         </TouchableOpacity>
         {categories.map((category, index) => {
           const categoryId = toText(category.category_id, `series-cat-${index}`);
@@ -302,41 +424,31 @@ export default function SeriesScreen() {
 
       <Text style={styles.count}>{filtered.length} exibidas • {totalCount} no total</Text>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rankRow}>
-        {[
-          { id: 'default', label: 'Relevantes' },
-          { id: 'release', label: 'Lancamentos' },
-          { id: 'popular', label: 'Mais assistidas' },
-          { id: 'rated', label: 'Mais votadas' },
-        ].map((item) => {
-          const active = rankingMode === (item.id as any);
-          return (
-            <TouchableOpacity
-              key={item.id}
-              style={[styles.rankChip, active && styles.rankChipActive]}
-              onPress={() => setRankingMode(item.id as any)}
-            >
-              <Text style={[styles.rankChipText, active && styles.rankChipTextActive]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+    
 
       <FlatList
         data={filtered}
-        numColumns={3}
+        numColumns={2}
         removeClippedSubviews
         initialNumToRender={12}
         maxToRenderPerBatch={12}
         windowSize={7}
         updateCellsBatchingPeriod={40}
         keyboardShouldPersistTaps="handled"
-        keyExtractor={(item, index) => String(item.series_id ?? `series-${index}`)}
+        keyExtractor={(item, index) => `series-${resolveSeriesId(item, index)}`}
         contentContainerStyle={styles.listContent}
         columnWrapperStyle={styles.columnWrap}
-        onEndReachedThreshold={0.45}
+        onEndReachedThreshold={0.2}
+        onMomentumScrollBegin={() => {
+          endReachedLockedByMomentumRef.current = false;
+        }}
+        onScrollBeginDrag={() => {
+          endReachedLockedByMomentumRef.current = false;
+        }}
         onEndReached={() => {
-          if (!isPageLoading && hasMore) {
+          if (endReachedLockedByMomentumRef.current) return;
+          endReachedLockedByMomentumRef.current = true;
+          if (!isPageLoadingRef.current && hasMoreRef.current) {
             void loadPage(false);
           }
         }}
@@ -406,7 +518,12 @@ export default function SeriesScreen() {
                 {tmdb?.releaseYear ? ` • ${tmdb.releaseYear}` : ''}
               </Text>
               {!!tasteProfile && (
-                <RecommendationChip reason={getReasonLabel(item)} numberOfLines={2} style={styles.reasonChip} />
+                <RecommendationChip
+                  reason={getReasonLabel(item)}
+                  numberOfLines={2}
+                  style={styles.reasonChip}
+                  seed={`series-${toText(item.series_id)}-${toText(item.title || item.name)}`}
+                />
               )}
               {summary.averageProgress > 0 && (
                 <Text style={styles.cardMeta} numberOfLines={1}>
@@ -529,7 +646,7 @@ const styles = StyleSheet.create({
   },
   rankRow: {
     paddingHorizontal: 16,
-    paddingTop: 4,
+    paddingTop: 18,
     paddingBottom: 16,
     gap: 8,
     alignItems: 'center',
@@ -577,9 +694,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  listContent: { padding: 16, paddingBottom: 120, gap: 12 },
+  listContent: { paddingHorizontal: 12, paddingBottom: 120, gap: 10 },
   columnWrap: { gap: 10 },
-  card: { flex: 1 },
+  card: { flex: 1, marginBottom: 6 },
   poster: {
     width: '100%',
     aspectRatio: 0.65,
@@ -667,6 +784,7 @@ const styles = StyleSheet.create({
   },
   downloadQuickBtn: {
     marginTop: 6,
+    marginBottom: 8,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: StreamingTheme.colors.border,

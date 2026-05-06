@@ -1,6 +1,22 @@
 import { getDbValue, setDbValue } from '@/services/local-db';
+import { scheduleAutoCloudBackup } from '@/services/backup-background';
+import { loadProfileScopedValue, saveProfileScopedValue } from '@/services/profile-scoped-storage';
 
 const KEY = 'movieProgressMap';
+const IMMEDIATE_SYNC_INTERVAL_MS = 90_000;
+let lastImmediateSyncAt = 0;
+
+function triggerImmediateProfileSyncIfNeeded() {
+  const now = Date.now();
+  if (now - lastImmediateSyncAt < IMMEDIATE_SYNC_INTERVAL_MS) {
+    return;
+  }
+
+  lastImmediateSyncAt = now;
+  import('@/services/cloud-sync')
+    .then(({ triggerImmediateSync }) => triggerImmediateSync())
+    .catch(() => null);
+}
 
 export type MovieProgressState = {
   positionMs: number;
@@ -13,7 +29,7 @@ export type MovieProgressMap = Record<string, MovieProgressState>;
 
 export async function loadMovieProgressMap(): Promise<MovieProgressMap> {
   try {
-    const parsed = await getDbValue<MovieProgressMap>(KEY);
+    const parsed = await loadProfileScopedValue<MovieProgressMap>(KEY, {});
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
@@ -21,7 +37,7 @@ export async function loadMovieProgressMap(): Promise<MovieProgressMap> {
 }
 
 async function saveMovieProgressMap(map: MovieProgressMap) {
-  await setDbValue(KEY, map);
+  await saveProfileScopedValue(KEY, map);
 }
 
 export async function updateMovieProgress(
@@ -46,6 +62,8 @@ export async function updateMovieProgress(
   };
 
   await saveMovieProgressMap(map);
+  scheduleAutoCloudBackup();
+  triggerImmediateProfileSyncIfNeeded();
   return map;
 }
 

@@ -1,7 +1,8 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
+import { Image } from 'expo-image';
+
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBackdrop } from '@/components/app-backdrop';
@@ -21,6 +23,9 @@ import { PageLoader } from '@/components/page-loader';
 import { ParentalUnlockModal } from '@/components/parental-unlock-modal';
 import { RecommendationChip } from '@/components/recommendation-chip';
 import { StreamingTheme } from '@/constants/streaming-theme';
+import { usePlanGate } from '@/hooks/use-plan-gate';
+import { loadAiSettings } from '@/services/ai-settings';
+import { recordCategoryEvent, recordSearchEvent } from '@/services/behavior-intelligence';
 import {
   AccessSnapshot,
   filterBlockedContent,
@@ -37,13 +42,49 @@ import {
   toText,
 } from '@/services/catalog-data';
 import { buildLiveUrl } from '@/services/stream-url';
-import { buildUserTasteProfile, getRecommendationReasons, rankContentByTaste, UserTasteProfile } from '@/services/taste-recommender';
+import { buildUserTasteProfile, getCachedTasteProfileSnapshot, getPersistedTasteProfileSnapshot, getRecommendationReasons, rankContentByTaste, shouldRefreshTasteProfile, UserTasteProfile } from '@/services/taste-recommender';
 
 const PAGE_SIZE = 120;
+const PROFILE_BUILD_TIMEOUT_MS = 1600;
+const PROFILE_ITEMS_SAMPLE_LIMIT = 280;
+const PROFILE_BACKGROUND_REFRESH_MS = 1000 * 60 * 60 * 24 * 2;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function resolveLiveId(item: StreamItem, index = 0) {
+  const raw = toText(item.stream_id).trim();
+  if (raw) return raw;
+  return `fallback-${index}-${toText(item.name || item.title, 'sem-id')}`;
+}
+
+function dedupeLive(input: StreamItem[]) {
+  const seen = new Set<string>();
+  return input.filter((item, index) => {
+    const id = resolveLiveId(item, index);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
 
 export default function AoVivoScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ categoryId?: string }>();
+  const { hasFeature, loading: planLoading } = usePlanGate();
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const hasRecommendationAlgorithm = aiEnabled && !planLoading && hasFeature('recommendation_algorithm');
   const [isLoading, setIsLoading] = useState(true);
   const [items, setItems] = useState<StreamItem[]>([]);
   const [categories, setCategories] = useState<StreamItem[]>([]);
@@ -51,11 +92,16 @@ export default function AoVivoScreen() {
   const [search, setSearch] = useState('');
   const [access, setAccess] = useState<AccessSnapshot | null>(null);
   const [tasteProfile, setTasteProfile] = useState<UserTasteProfile | null>(null);
+  const [isAlgorithmLoading, setIsAlgorithmLoading] = useState(false);
   const [showUnlockModal, setShowUnlockModal] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isPageLoading, setIsPageLoading] = useState(false);
+  const offsetRef = useRef(0);
+  const hasMoreRef = useRef(true);
+  const isPageLoadingRef = useRef(false);
+  const endReachedLockedByMomentumRef = useRef(true);
 
   const openLivePlayer = async (item: StreamItem) => {
     const url = await buildLiveUrl(item);
@@ -79,13 +125,37 @@ export default function AoVivoScreen() {
     setSelectedCategory(params.categoryId ? String(params.categoryId) : 'all');
   }, [params.categoryId]);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      let mounted = true;
+      void loadAiSettings().then((settings) => {
+        if (!mounted) return;
+        setAiEnabled(settings.enabled);
+      });
+      return () => {
+        mounted = false;
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    if (search.trim().length < 2) return;
+    void recordSearchEvent(search, 'ao-vivo');
+  }, [search]);
+
+  useEffect(() => {
+    if (!selectedCategory || selectedCategory === 'all') return;
+    void recordCategoryEvent(selectedCategory, 'ao-vivo');
+  }, [selectedCategory]);
+
   const loadPage = useCallback(
     async (reset: boolean) => {
-      if (isPageLoading) return;
+      if (isPageLoadingRef.current) return;
 
+      isPageLoadingRef.current = true;
       setIsPageLoading(true);
       try {
-        const nextOffset = reset ? 0 : offset;
+        const nextOffset = reset ? 0 : offsetRef.current;
         const [count, page] = await Promise.all([
           queryCatalogCount({ kind: 'live', categoryId: selectedCategory, search }),
           queryCatalogPage({
@@ -100,27 +170,33 @@ export default function AoVivoScreen() {
         if (reset && count === 0) {
           setItems([]);
           setTotalCount(0);
+          offsetRef.current = 0;
           setOffset(0);
+          hasMoreRef.current = false;
           setHasMore(false);
           return;
         }
 
         if (reset) {
-          setItems(page);
+          setItems(dedupeLive(page));
+          offsetRef.current = page.length;
           setOffset(page.length);
         } else {
-          setItems((prev) => [...prev, ...page]);
-          setOffset((prev) => prev + page.length);
+          setItems((prev) => dedupeLive([...prev, ...page]));
+          offsetRef.current += page.length;
+          setOffset(offsetRef.current);
         }
 
         setTotalCount(count);
         const loaded = (reset ? 0 : nextOffset) + page.length;
-        setHasMore(loaded < count);
+        hasMoreRef.current = loaded < count;
+        setHasMore(hasMoreRef.current);
       } finally {
+        isPageLoadingRef.current = false;
         setIsPageLoading(false);
       }
     },
-    [isPageLoading, offset, search, selectedCategory]
+    [search, selectedCategory]
   );
 
   useEffect(() => {
@@ -153,23 +229,65 @@ export default function AoVivoScreen() {
       (channel) => `${toText(channel.name || channel.title)} ${toText(channel.category_name)}`
     );
 
-    if (!tasteProfile) return protectedItems;
-    return rankContentByTaste(protectedItems, 'live', tasteProfile);
-  }, [items, access, tasteProfile]);
+    const uniqueItems = dedupeLive(protectedItems);
+
+    if (!hasRecommendationAlgorithm || !tasteProfile) return uniqueItems;
+    return rankContentByTaste(uniqueItems, 'live', tasteProfile);
+  }, [items, access, tasteProfile, hasRecommendationAlgorithm]);
 
   useEffect(() => {
     const refreshTaste = async () => {
-      if (!access) return;
-      setTasteProfile(
-        await buildUserTasteProfile({
-          settings: access.settings,
-          catalog: { vod: [], series: [], liveStreams: items },
-        })
-      );
+      if (!access || !hasRecommendationAlgorithm) {
+        setTasteProfile(null);
+        setIsAlgorithmLoading(false);
+        return;
+      }
+
+      setIsAlgorithmLoading(true);
+
+      try {
+        const cachedProfile = getCachedTasteProfileSnapshot(access.settings);
+        if (cachedProfile) {
+          setTasteProfile(cachedProfile);
+        }
+
+        const persistedProfile = await getPersistedTasteProfileSnapshot(
+          access.settings,
+          PROFILE_BACKGROUND_REFRESH_MS
+        );
+        if (persistedProfile) {
+          setTasteProfile(persistedProfile);
+        }
+
+        const shouldRefresh = await shouldRefreshTasteProfile(
+          access.settings,
+          PROFILE_BACKGROUND_REFRESH_MS
+        );
+
+        if (!shouldRefresh) {
+          return;
+        }
+
+        const sampleLive = items.slice(0, PROFILE_ITEMS_SAMPLE_LIMIT);
+        const nextProfile = await withTimeout(
+          buildUserTasteProfile({
+            settings: access.settings,
+            catalog: { vod: [], series: [], liveStreams: sampleLive },
+          }),
+          PROFILE_BUILD_TIMEOUT_MS,
+          null
+        );
+
+        if (nextProfile) {
+          setTasteProfile(nextProfile);
+        }
+      } finally {
+        setIsAlgorithmLoading(false);
+      }
     };
 
     void refreshTaste();
-  }, [access, items]);
+  }, [access, items, hasRecommendationAlgorithm]);
 
   const hideImages = !!access && shouldHideContentImages(access);
 
@@ -194,7 +312,7 @@ export default function AoVivoScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <AppBackdrop blurIntensity={28} />
-      <PageLoader visible={isLoading} label="Carregando TV ao vivo" />
+      <PageLoader visible={isLoading || (hasRecommendationAlgorithm && isAlgorithmLoading)} label="Carregando TV ao vivo" />
 
       <View style={styles.header}>
         <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
@@ -248,17 +366,27 @@ export default function AoVivoScreen() {
 
       <FlatList
         data={filtered}
+        numColumns={2}
         removeClippedSubviews
         initialNumToRender={14}
         maxToRenderPerBatch={14}
         windowSize={8}
         updateCellsBatchingPeriod={40}
         keyboardShouldPersistTaps="handled"
-        keyExtractor={(item, index) => String(item.stream_id ?? `live-${index}`)}
+        keyExtractor={(item, index) => `live-${resolveLiveId(item, index)}`}
         contentContainerStyle={styles.listContent}
-        onEndReachedThreshold={0.45}
+        columnWrapperStyle={styles.columnWrap}
+        onEndReachedThreshold={0.2}
+        onMomentumScrollBegin={() => {
+          endReachedLockedByMomentumRef.current = false;
+        }}
+        onScrollBeginDrag={() => {
+          endReachedLockedByMomentumRef.current = false;
+        }}
         onEndReached={() => {
-          if (!isPageLoading && hasMore) {
+          if (endReachedLockedByMomentumRef.current) return;
+          endReachedLockedByMomentumRef.current = true;
+          if (!isPageLoadingRef.current && hasMoreRef.current) {
             void loadPage(false);
           }
         }}
@@ -272,26 +400,33 @@ export default function AoVivoScreen() {
         }
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.card} onPress={() => openLivePlayer(item)}>
-            <View style={styles.logoRow}>
+            <View style={styles.posterWrap}>
               {hideImages ? (
-                <View style={styles.logoHidden}>
+                <View style={[styles.poster, styles.posterHidden]}>
                   <MaterialIcons name="image-not-supported" size={22} color={StreamingTheme.colors.textMuted} />
                 </View>
               ) : (
-                <Image source={{ uri: toText(item.stream_icon || item.cover) }} style={styles.logo} cachePolicy="disk" />
+                <Image
+                  source={{ uri: toText(item.stream_icon || item.cover) }}
+                  style={styles.poster}
+                  contentFit="contain"
+                  cachePolicy="disk"
+                />
               )}
             </View>
-            <View style={styles.cardTop}>
-              <Text style={styles.cardTitle}>{sanitizeLabelText(item.name || item.title, 'Canal')}</Text>
-              <View style={styles.liveTag}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveText}>AO VIVO</Text>
-              </View>
+            <View style={styles.cardTopRow}>
+              <Text style={styles.cardTitle} numberOfLines={1}>{sanitizeLabelText(item.name || item.title, 'Canal')}</Text>
+              <Text style={styles.liveText}>AO VIVO</Text>
             </View>
             {!!tasteProfile && (
-              <RecommendationChip reason={getReasonLabel(item)} numberOfLines={2} style={styles.reasonChip} />
+              <RecommendationChip
+                reason={getReasonLabel(item)}
+                numberOfLines={2}
+                style={styles.reasonChip}
+                seed={`live-${toText(item.stream_id)}-${toText(item.name || item.title)}`}
+              />
             )}
-            <Text style={styles.cardSub}>{sanitizeLabelText(item.category_name, 'Programacao ao vivo')}</Text>
+            <Text style={styles.cardSub} numberOfLines={1}>{sanitizeLabelText(item.category_name, 'Programacao ao vivo')}</Text>
           </TouchableOpacity>
         )}
       />
@@ -411,51 +546,50 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  listContent: { padding: 16, paddingBottom: 120, gap: 10 },
+  listContent: { paddingHorizontal: 12, paddingBottom: 120, gap: 10 },
+  columnWrap: { gap: 10 },
   card: {
-    borderRadius: 14,
+    flex: 1,
+    marginBottom: 6,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: StreamingTheme.colors.border,
+    backgroundColor: StreamingTheme.colors.surface,
+    padding: 8,
+  },
+  posterWrap: {
+    marginBottom: 6,
+  },
+  poster: {
+    width: '100%',
+    aspectRatio: 0.65,
+    borderRadius: 12,
     backgroundColor: StreamingTheme.colors.surfaceAlt,
-    padding: 14,
   },
-  logoRow: {
-    height: 58,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  logo: {
-    width: '70%',
-    height: '72%',
-  },
-  logoHidden: {
-    width: '70%',
-    height: '72%',
+  posterHidden: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardTop: {
+  cardTopRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'space-between',
+    gap: 8,
   },
   cardTitle: {
     flex: 1,
     color: StreamingTheme.colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 12,
+    fontWeight: '700',
   },
   reasonChip: {
-    marginTop: 6,
+    marginTop: 4,
   },
   cardSub: {
-    marginTop: 8,
-    color: StreamingTheme.colors.textSecondary,
-    fontSize: 12,
+    marginTop: 2,
+    color: StreamingTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
   },
   pageLoaderWrap: {
     width: '100%',
@@ -469,23 +603,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  liveTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,59,48,0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 999,
-    backgroundColor: StreamingTheme.colors.accent,
-  },
   liveText: {
-    color: StreamingTheme.colors.textPrimary,
+    color: StreamingTheme.colors.accentAlt,
     fontSize: 10,
     fontWeight: '800',
   },

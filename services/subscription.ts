@@ -11,10 +11,13 @@ import { loadUserSession } from '@/services/cloud-sync';
 
 const PLAN_KEY = 'subscription.plan.v1';
 const PLAN_STATE_DB_KEY = 'subscription.plan.state.v1';
+const PLAN_CATALOG_DB_KEY = 'subscription.plan.catalog.v1';
+const SUBSCRIPTION_CONTENT_DB_KEY = 'subscription.page.content.v1';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
-export type PlanId = 'free' | 'plus' | 'pro' | 'ultra' | 'lifetime';
+export type KnownPlanId = 'free' | 'plus' | 'pro' | 'ultra' | 'lifetime';
+export type PlanId = KnownPlanId | (string & {});
 
 export type Feature =
   | 'explore'           // aba Explorar
@@ -29,7 +32,8 @@ export type Feature =
   | 'realtime_monitor'  // monitor parental em tempo real
   | 'multi_server'      // múltiplos servidores
   | 'multi_user'        // múltiplos perfis
-  | 'content_4k';       // conteúdo 4K
+  | 'content_4k'        // conteúdo 4K
+  | 'network_proxy';     // proxy de rede para contornar bloqueios
 
 export type Plan = {
   id: PlanId;
@@ -38,10 +42,29 @@ export type Plan = {
   price: string;          // ex: "R$ 19,90/mês"
   priceNote: string;      // ex: "Cobrado mensalmente"
   color: string;
-  features: Feature[];
+  features: string[];
   maxProfiles: number;    // -1 = ilimitado
   maxServers: number;     // -1 = ilimitado
   highlighted?: boolean;
+  enabled?: boolean;
+};
+
+export type SubscriptionTriggerChip = {
+  icon: string;
+  text: string;
+};
+
+export type SubscriptionFeatureMeta = {
+  label: string;
+  icon: string;
+  desc: string;
+};
+
+export type SubscriptionPageContent = {
+  triggers: SubscriptionTriggerChip[];
+  featureLabels: Record<string, SubscriptionFeatureMeta>;
+  compareOrder: string[];
+  updatedAt?: string;
 };
 
 export type PlanStatus = 'active' | 'expired' | 'grace' | 'unknown';
@@ -59,7 +82,7 @@ export type LocalPlanState = {
 
 // ─── Definição dos planos ─────────────────────────────────────────────────────
 
-export const PLANS: Plan[] = [
+export const DEFAULT_PLANS: Plan[] = [
    {
     id: 'free',
     name: 'Start',
@@ -134,6 +157,7 @@ export const PLANS: Plan[] = [
       'multi_server',
       'multi_user',
       'content_4k',
+      'network_proxy',
     ],
   },
   {
@@ -159,20 +183,153 @@ export const PLANS: Plan[] = [
       'multi_server',
       'multi_user',
       'content_4k',
+      'network_proxy',
     ],
   },
 ];
 
+let planCatalogCache: Plan[] | null = null;
+let planCatalogFetchedAt = 0;
+export let PLANS: Plan[] = [...DEFAULT_PLANS];
+const PLAN_CATALOG_REFRESH_TTL_MS = 1000 * 60 * 5;
+let subscriptionContentCache: SubscriptionPageContent | null = null;
+let subscriptionContentFetchedAt = 0;
+const SUBSCRIPTION_CONTENT_REFRESH_TTL_MS = 1000 * 60 * 5;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 export function getPlan(id: PlanId): Plan {
-  return PLANS.find((p) => p.id === id) ?? PLANS[0];
+  return PLANS.find((p) => p.id === id) ?? PLANS[0] ?? DEFAULT_PLANS[0];
 }
 
 let _cached: PlanId | null = null;
+const planListeners = new Set<(plan: Plan, state: LocalPlanState | null) => void>();
+
+function emitPlanChange(state: LocalPlanState | null) {
+  const plan = getPlan(state?.planId || 'free');
+  _cached = plan.id;
+  planListeners.forEach((listener) => {
+    try {
+      listener(plan, state);
+    } catch {
+      // Ignora falha isolada de listener para nao interromper atualizacao do plano.
+    }
+  });
+}
 
 function normalizePlanId(value: unknown): PlanId {
   return PLANS.some((plan) => plan.id === value) ? (value as PlanId) : 'free';
+}
+
+const VALID_FEATURES: Feature[] = [
+  'explore',
+  'downloads',
+  'lists',
+  'cast_mirror',
+  'pip',
+  'airplay',
+  'recommendation_algorithm',
+  'tmdb_details',
+  'parental_controls',
+  'realtime_monitor',
+  'multi_server',
+  'multi_user',
+  'content_4k',
+  'network_proxy',
+];
+
+function normalizePlanCatalog(input: unknown): Plan[] {
+  const source = Array.isArray(input) ? input : [];
+  const normalized = source
+    .map((raw: any): Plan | null => {
+      const id = String(raw?.id || '').trim();
+      if (!id) return null;
+
+      const maxProfilesRaw = Number(raw?.maxProfiles);
+      const maxServersRaw = Number(raw?.maxServers);
+      const maxProfiles = Number.isFinite(maxProfilesRaw) ? Math.max(-1, Math.floor(maxProfilesRaw)) : 1;
+      const maxServers = Number.isFinite(maxServersRaw) ? Math.max(-1, Math.floor(maxServersRaw)) : 1;
+      const features = Array.isArray(raw?.features)
+        ? raw.features.map((item: any) => String(item || '').trim()).filter((item: string) => VALID_FEATURES.includes(item as Feature))
+        : [];
+
+      return {
+        id,
+        name: String(raw?.name || id).trim() || id,
+        tagline: String(raw?.tagline || '').trim(),
+        price: String(raw?.price || '').trim() || 'R$ 0',
+        priceNote: String(raw?.priceNote || '').trim(),
+        color: String(raw?.color || '#7F89A8').trim() || '#7F89A8',
+        features,
+        maxProfiles,
+        maxServers,
+        highlighted: raw?.highlighted === true,
+        enabled: raw?.enabled !== false,
+      };
+    })
+    .filter((item): item is Plan => !!item && item.enabled !== false);
+
+  const withFree = normalized.some((plan) => plan.id === 'free')
+    ? normalized
+    : [DEFAULT_PLANS[0], ...normalized];
+
+  return withFree.length ? withFree : [...DEFAULT_PLANS];
+}
+
+async function saveLocalPlanCatalog(plans: Plan[]) {
+  await setDbValue(PLAN_CATALOG_DB_KEY, plans);
+  planCatalogCache = plans;
+  planCatalogFetchedAt = Date.now();
+  PLANS = plans;
+}
+
+async function loadLocalPlanCatalog(): Promise<Plan[] | null> {
+  try {
+    const raw = await getDbValue<Plan[]>(PLAN_CATALOG_DB_KEY);
+    const normalized = normalizePlanCatalog(raw);
+    if (normalized.length) {
+      planCatalogCache = normalized;
+      PLANS = normalized;
+      return normalized;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAvailablePlans(forceRefresh = false): Promise<Plan[]> {
+  const hasPaidInCache = !!planCatalogCache?.some((plan) => plan.id !== 'free');
+  const shouldUseCache =
+    !forceRefresh &&
+    !!planCatalogCache?.length &&
+    hasPaidInCache &&
+    Date.now() - planCatalogFetchedAt < PLAN_CATALOG_REFRESH_TTL_MS;
+
+  if (shouldUseCache) {
+    return planCatalogCache || [...DEFAULT_PLANS];
+  }
+
+  const local = await loadLocalPlanCatalog();
+
+  try {
+    const body = await apiRequest<{ plans: Plan[] }>('/api/subscription/plans', {
+      timeoutMs: 7000,
+    });
+    const remote = normalizePlanCatalog(body?.plans || []);
+    await saveLocalPlanCatalog(remote);
+    return remote;
+  } catch {
+    const hasPaidInLocal = !!local?.some((plan) => plan.id !== 'free');
+    if (local?.length && hasPaidInLocal) {
+      planCatalogFetchedAt = Date.now();
+      return local;
+    }
+    planCatalogCache = [...DEFAULT_PLANS];
+    planCatalogFetchedAt = Date.now();
+    PLANS = [...DEFAULT_PLANS];
+    return [...DEFAULT_PLANS];
+  }
 }
 
 function normalizeStatus(value: unknown): PlanStatus {
@@ -251,7 +408,9 @@ async function readRemotePlanState(): Promise<LocalPlanState | null> {
     const normalized = normalizePlanState(body?.planState);
     if (normalized) {
       await setDbValue(PLAN_STATE_DB_KEY, normalized);
+      await setDbValue(PLAN_KEY, normalized.planId);
       _cached = normalized.planId;
+      emitPlanChange(normalized);
     }
     return normalized;
   } catch {
@@ -293,9 +452,24 @@ export async function setLocalPlanState(
 ) {
   const next = buildLocalPlanState(planId, partial);
   await setDbValue(PLAN_STATE_DB_KEY, next);
+  await setDbValue(PLAN_KEY, next.planId);
   _cached = planId;
+  emitPlanChange(next);
   await writeRemotePlanState(next);
   return next;
+}
+
+export async function applyRemotePlanState(raw: Partial<LocalPlanState> | null | undefined) {
+  const normalized = normalizePlanState(raw);
+  if (!normalized) {
+    return null;
+  }
+
+  await setDbValue(PLAN_STATE_DB_KEY, normalized);
+  await setDbValue(PLAN_KEY, normalized.planId);
+  _cached = normalized.planId;
+  emitPlanChange(normalized);
+  return normalized;
 }
 
 export async function refreshPlanStateAtLaunch(): Promise<LocalPlanState | null> {
@@ -322,11 +496,15 @@ export async function refreshPlanStateAtLaunch(): Promise<LocalPlanState | null>
   };
 
   await setDbValue(PLAN_STATE_DB_KEY, updated);
+  await setDbValue(PLAN_KEY, updated.planId);
   _cached = updated.planId;
+  emitPlanChange(updated);
   return updated;
 }
 
 export async function getActivePlan(): Promise<Plan> {
+  await getAvailablePlans();
+
   const remote = await readRemotePlanState();
   if (remote) {
     return getPlan(remote.planId);
@@ -347,9 +525,20 @@ export async function getActivePlan(): Promise<Plan> {
   return getPlan(id);
 }
 
+export function subscribeToPlanChanges(listener: (plan: Plan, state: LocalPlanState | null) => void) {
+  planListeners.add(listener);
+  return () => {
+    planListeners.delete(listener);
+  };
+}
+
 export async function getActivePlanId(): Promise<PlanId> {
   const plan = await getActivePlan();
   return plan.id;
+}
+
+export async function refreshPlanCatalog(): Promise<Plan[]> {
+  return getAvailablePlans(true);
 }
 
 /** Apenas para uso interno/dev — em produção o plano vem do backend. */
@@ -407,4 +596,117 @@ export const FEATURE_LABELS: Record<Feature, { label: string; icon: string; desc
   multi_server:             { label: 'Multi-servidor',       icon: 'dns',                   desc: 'Cadastre vários servidores e alterne sem perder histórico' },
   multi_user:               { label: 'Multi-perfis',         icon: 'group',                 desc: 'Perfis separados com histórico e preferências próprias' },
   content_4k:               { label: 'Reprodução 4K',        icon: 'hd',                    desc: 'Recursos de reprodução e interface otimizados para conteúdo 4K' },
+  network_proxy:            { label: 'Proxy de rede',        icon: 'vpn-lock',              desc: 'Roteia a reprodução pelo servidor para contornar bloqueios de rede/VPN' },
 };
+
+export const DEFAULT_SUBSCRIPTION_TRIGGERS: SubscriptionTriggerChip[] = [
+  { icon: 'bolt', text: 'Use seu próprio conteúdo com desempenho e organização' },
+  { icon: 'hd', text: 'Recursos avançados de reprodução (incluindo 4K)' },
+  { icon: 'download', text: 'Baixe para assistir offline quando quiser' },
+  { icon: 'auto-awesome', text: 'Recomendações inteligentes com seu histórico' },
+  { icon: 'cast', text: 'Espelhamento e transmissão para TV' },
+  { icon: 'shield', text: 'Controle parental e monitoramento em tempo real' },
+  { icon: 'picture-in-picture-alt', text: 'PiP para continuar assistindo em miniatura' },
+  { icon: 'group', text: 'Perfis e servidores extras para toda a família' },
+];
+
+export const DEFAULT_SUBSCRIPTION_PAGE_CONTENT: SubscriptionPageContent = {
+  triggers: [...DEFAULT_SUBSCRIPTION_TRIGGERS],
+  featureLabels: FEATURE_LABELS,
+  compareOrder: Object.keys(FEATURE_LABELS),
+};
+
+function normalizeSubscriptionPageContent(
+  raw: Partial<SubscriptionPageContent> | null | undefined
+): SubscriptionPageContent {
+  const source = raw && typeof raw === 'object' ? raw : {};
+
+  const triggers = Array.isArray(source.triggers)
+    ? source.triggers
+        .map((item) => ({
+          icon: String(item?.icon || '').trim() || 'bolt',
+          text: String(item?.text || '').trim(),
+        }))
+        .filter((item) => !!item.text)
+    : [];
+
+  const sourceLabels = source.featureLabels && typeof source.featureLabels === 'object'
+    ? source.featureLabels
+    : {};
+
+  const featureLabels: Record<string, SubscriptionFeatureMeta> = {
+    ...(FEATURE_LABELS as Record<string, SubscriptionFeatureMeta>),
+  };
+
+  Object.entries(sourceLabels).forEach(([featureId, value]) => {
+    if (!featureId) return;
+    const safeValue = value && typeof value === 'object' ? value : {};
+    featureLabels[String(featureId)] = {
+      label: String((safeValue as any).label || featureId).trim() || featureId,
+      icon: String((safeValue as any).icon || 'stars').trim() || 'stars',
+      desc: String((safeValue as any).desc || '').trim(),
+    };
+  });
+
+  const compareOrder = Array.isArray(source.compareOrder)
+    ? Array.from(new Set(source.compareOrder.map((item) => String(item || '').trim()).filter(Boolean)))
+    : [];
+
+  return {
+    triggers: triggers.length ? triggers : [...DEFAULT_SUBSCRIPTION_TRIGGERS],
+    featureLabels,
+    compareOrder: compareOrder.length ? compareOrder : Object.keys(featureLabels),
+    updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : '',
+  };
+}
+
+async function saveLocalSubscriptionContent(content: SubscriptionPageContent) {
+  await setDbValue(SUBSCRIPTION_CONTENT_DB_KEY, content);
+  subscriptionContentCache = content;
+  subscriptionContentFetchedAt = Date.now();
+}
+
+async function loadLocalSubscriptionContent(): Promise<SubscriptionPageContent | null> {
+  try {
+    const raw = await getDbValue<SubscriptionPageContent>(SUBSCRIPTION_CONTENT_DB_KEY);
+    if (!raw) return null;
+    const normalized = normalizeSubscriptionPageContent(raw);
+    subscriptionContentCache = normalized;
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
+export async function getSubscriptionPageContent(forceRefresh = false): Promise<SubscriptionPageContent> {
+  const shouldUseCache =
+    !forceRefresh &&
+    !!subscriptionContentCache &&
+    Date.now() - subscriptionContentFetchedAt < SUBSCRIPTION_CONTENT_REFRESH_TTL_MS;
+
+  if (shouldUseCache && subscriptionContentCache) {
+    return subscriptionContentCache;
+  }
+
+  const local = await loadLocalSubscriptionContent();
+
+  try {
+    const body = await apiRequest<{ content: SubscriptionPageContent }>('/api/subscription/content', {
+      timeoutMs: 7000,
+    });
+
+    const remote = normalizeSubscriptionPageContent(body?.content);
+    await saveLocalSubscriptionContent(remote);
+    return remote;
+  } catch {
+    if (local) {
+      subscriptionContentFetchedAt = Date.now();
+      return local;
+    }
+
+    const fallback = normalizeSubscriptionPageContent(DEFAULT_SUBSCRIPTION_PAGE_CONTENT);
+    subscriptionContentCache = fallback;
+    subscriptionContentFetchedAt = Date.now();
+    return fallback;
+  }
+}

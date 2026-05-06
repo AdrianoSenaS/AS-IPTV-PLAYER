@@ -1,8 +1,9 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import React, { useEffect, useMemo, useState } from 'react';
+import { Alert } from 'react-native';
 import {
   ActivityIndicator,
   Animated,
@@ -17,7 +18,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppBackdrop } from '@/components/app-backdrop';
 import { StreamingTheme } from '@/constants/streaming-theme';
-import { resetAccessSessionForLaunch, shouldRequireProfileSelection } from '@/services/access-control';
+import { loadAccountSettings } from '@/services/account-settings';
+import { apiRequest } from '@/services/app-server';
+import { clearUserSession, loadUserSession, restoreLastCloudBackup } from '@/services/cloud-sync';
+import { isProfileUnlocked, resetAccessSessionForLaunch, shouldRequireProfileSelection } from '@/services/access-control';
+import { shouldShowAlgorithmOnboarding } from '@/services/behavior-intelligence';
 import {
   clearCatalogStaging,
   commitCatalogStaging,
@@ -30,9 +35,10 @@ import {
   StreamItem,
 } from '../services/catalog-data';
 import { isDemoModeEnabled } from '@/services/demo-mode';
-import { getDbValue } from '@/services/local-db';
+import { getDbValue, removeDbValue, setDbValue } from '@/services/local-db';
 import { hasInternetConnection } from '@/services/network';
 import { loadCatalogRefreshPeriod, shouldRefreshCatalog } from '@/services/update-schedule';
+import { getHomeRouteForDevice, getProfileEntryForDevice, isNonMobileDevice } from '@/services/device-profile';
 
 type StepStatus = 'pending' | 'loading' | 'done' | 'error';
 
@@ -61,6 +67,31 @@ type Credentials = {
   password: string;
 };
 
+const ACCESS_BLOCK_MESSAGE_KEY = 'session.access.blocked.message.v1';
+
+async function clearServerCredentials() {
+  await Promise.all([
+    removeDbValue('name'),
+    removeDbValue('url'),
+    removeDbValue('username'),
+    removeDbValue('password'),
+  ]);
+}
+
+async function blockAccessToLogin(message: string) {
+  await Promise.all([
+    setDbValue(ACCESS_BLOCK_MESSAGE_KEY, message),
+    clearServerCredentials(),
+    clearUserSession().catch(() => null),
+  ]);
+}
+
+async function isActiveProfileAllowed() {
+  const settings = await loadAccountSettings();
+  const activeProfile = settings.profiles.find((item) => item.id === settings.activeProfileId) || settings.profiles[0] || null;
+  return !!activeProfile && activeProfile.enabled !== false;
+}
+
 async function api(action: string, credentials: Credentials) {
   const endpoint = `${credentials.url}/player_api.php?username=${credentials.username}&password=${credentials.password}&action=${action}`;
   return (await fetch(endpoint)).json();
@@ -73,12 +104,18 @@ async function saveDataStream(fileName: string, data: object) {
 
 export default function LoadingScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ from?: string }>();
+  const isLargeDevice = isNonMobileDevice();
+  const homeRoute = getHomeRouteForDevice();
+  const profileEntry = getProfileEntryForDevice();
+  const cameFromProfileSelection = String(params?.from || '') === 'profile';
   const [logs, setLogs] = useState<string[]>([]);
   const [currentStep, setCurrentStep] = useState<number>(0);
   const [stepStates, setStepStates] = useState<Record<number, StepStatus>>({});
   const [progress, setProgress] = useState(0);
   const [loadingDone, setLoadingDone] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [focusedAction, setFocusedAction] = useState('');
   const heroPulse = useState(() => new Animated.Value(0))[0];
   const activeStepPulse = useState(() => new Animated.Value(0))[0];
   const progressShimmer = useState(() => new Animated.Value(0))[0];
@@ -95,6 +132,55 @@ export default function LoadingScreen() {
     try {
       setFailure(null);
 
+      const session = await loadUserSession();
+      if (session?.token) {
+        try {
+          await apiRequest('/api/auth/me', { token: session.token, timeoutMs: 20000 });
+        } catch (error: any) {
+          const message = String(error?.message || '');
+          if (/inativo/i.test(message)) {
+            await blockAccessToLogin(message || 'Usuario inativo. Contate o administrador.');
+            router.replace('/login');
+            return;
+          }
+        }
+      }
+
+      const profileAllowed = await isActiveProfileAllowed();
+      if (!profileAllowed) {
+        await blockAccessToLogin('Seu perfil esta desativado. Entre novamente para continuar.');
+        router.replace('/login');
+        return;
+      }
+
+      const navigateAfterLoading = async () => {
+        if (cameFromProfileSelection) {
+          router.replace(homeRoute as any);
+          return;
+        }
+
+        // Primeiro login/restauracao: se faltar onboarding de IA, coleta preferencias
+        // antes da selecao de perfil para evitar fluxo quebrado apos reinstall.
+        const shouldOpenIaSetup = !isLargeDevice && (await shouldShowAlgorithmOnboarding());
+        if (shouldOpenIaSetup) {
+          router.replace({ pathname: '/algoritmo-preferencias', params: { next: 'perfil-acesso' } });
+          return;
+        }
+
+        await resetAccessSessionForLaunch();
+        const requireProfileSelection = (await shouldRequireProfileSelection()) && !(await isProfileUnlocked());
+        router.replace(
+          requireProfileSelection ? `/perfil-acesso?next=${profileEntry}` : (homeRoute as any)
+        );
+      };
+
+      // Restaura backup somente no boot frio (nao quando vem de selecao de perfil,
+      // pois o restore sobrescreveria o activeProfileId escolhido pelo usuario).
+      if (!cameFromProfileSelection) {
+        appendLog('Restaurando dados de perfil e servidor...');
+        await restoreLastCloudBackup().catch(() => null);
+      }
+
       const [lastUpdate, period, hasLocalData] = await Promise.all([
         getCatalogLastUpdate(),
         loadCatalogRefreshPeriod(),
@@ -107,10 +193,8 @@ export default function LoadingScreen() {
         appendLog('Catalogo local atualizado. Pulando sincronizacao remota.');
         setProgress(100);
         setLoadingDone(true);
-        await resetAccessSessionForLaunch();
-        const requireProfileSelection = await shouldRequireProfileSelection();
         setTimeout(() => {
-          router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+          void navigateAfterLoading();
         }, 120);
         return;
       }
@@ -121,10 +205,8 @@ export default function LoadingScreen() {
           appendLog('Sem internet. Usando catalogo local salvo.');
           setProgress(100);
           setLoadingDone(true);
-          await resetAccessSessionForLaunch();
-          const requireProfileSelection = await shouldRequireProfileSelection();
           setTimeout(() => {
-            router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+            void navigateAfterLoading();
           }, 120);
           return;
         }
@@ -142,10 +224,8 @@ export default function LoadingScreen() {
         appendLog('Modo demo ativo. Pulando sincronizacao remota...');
         setProgress(100);
         setLoadingDone(true);
-        await resetAccessSessionForLaunch();
-        const requireProfileSelection = await shouldRequireProfileSelection();
         setTimeout(() => {
-          router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+          void navigateAfterLoading();
         }, 120);
         return;
       }
@@ -218,12 +298,31 @@ export default function LoadingScreen() {
               try {
                 await saveDataStream(step.fileName, []);
               } catch {
-                // Falha de persistencia local do EPG nao pode bloquear a entrada no app.
                 appendLog('Nao foi possivel salvar fallback do EPG localmente.');
               }
             }
           } else {
             markStep(step.id, 'error');
+            // Alerta detalhado para etapa de filmes
+            if (step.action === 'get_vod_streams') {
+              const errMsg = String(stepError?.message || stepError || 'Erro desconhecido ao carregar catálogo de filmes.');
+              console.error('[loading][get_vod_streams] Falha ao carregar catálogo de filmes:', stepError);
+              let userMsg = 'Erro ao carregar catálogo de filmes.\n';
+              if (/sqlite|database|busy|corrupt|locked/i.test(errMsg)) {
+                userMsg += 'Problema no banco de dados local. Tente reiniciar o app ou limpar o cache.';
+              } else if (/network|fetch|timeout|conexao|connection|internet/i.test(errMsg)) {
+                userMsg += 'Falha de conexão com o servidor. Verifique sua internet e tente novamente.';
+              } else {
+                userMsg += errMsg;
+              }
+              // Exibe alerta na TV/mobile
+              if (typeof Alert !== 'undefined' && Alert.alert) {
+                Alert.alert('Erro no catálogo de filmes', userMsg, [
+                  { text: 'Tentar novamente', onPress: retry },
+                  { text: 'Cancelar', style: 'cancel' },
+                ]);
+              }
+            }
             throw stepError;
           }
         }
@@ -246,11 +345,9 @@ export default function LoadingScreen() {
 
       appendLog('Tudo pronto. Entrando na sua home...');
       setLoadingDone(true);
-      await resetAccessSessionForLaunch();
-      const requireProfileSelection = await shouldRequireProfileSelection();
 
       setTimeout(() => {
-        router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+        void navigateAfterLoading();
       }, 180);
     } catch (error: any) {
       await clearCatalogStaging().catch(() => {
@@ -393,22 +490,22 @@ export default function LoadingScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, isLargeDevice && stylesTv.container]}>
       <StatusBar barStyle="light-content" />
       <AppBackdrop blurIntensity={32} />
 
-      <View style={styles.header}>
+      <View style={[styles.header, isLargeDevice && stylesTv.header]}>
         <View style={styles.kickerRow}>
           <View style={styles.liveDot} />
           <Text style={styles.kicker}>Sincronizacao inteligente</Text>
         </View>
-        <Text style={styles.title}>Preparando seu streaming</Text>
-        <Text style={styles.subtitle}>
+        <Text style={[styles.title, isLargeDevice && stylesTv.title]}>Preparando seu streaming</Text>
+        <Text style={[styles.subtitle, isLargeDevice && stylesTv.subtitle]}>
           Sincronizando catalogos, categorias e canais do seu servidor para uma experiencia local mais fluida.
         </Text>
       </View>
 
-      <Animated.View style={[styles.heroCard, heroAnimatedStyle]}>
+      <Animated.View style={[styles.heroCard, isLargeDevice && stylesTv.heroCard, heroAnimatedStyle]}>
         <LinearGradient colors={StreamingTheme.gradients.card} style={styles.heroGradient}>
           <View style={styles.heroTop}>
             <View style={styles.heroIconWrap}>
@@ -442,7 +539,7 @@ export default function LoadingScreen() {
         </LinearGradient>
       </Animated.View>
 
-      <View style={styles.noticeCard}>
+      <View style={[styles.noticeCard, isLargeDevice && stylesTv.noticeCard]}>
         <MaterialIcons name="schedule" size={18} color={StreamingTheme.colors.warning} />
         <View style={styles.noticeContent}>
           <Text style={styles.noticeTitle}>Tempo estimado de sincronizacao</Text>
@@ -453,7 +550,7 @@ export default function LoadingScreen() {
         </View>
       </View>
 
-      <View style={styles.progressCard}>
+      <View style={[styles.progressCard, isLargeDevice && stylesTv.progressCard]}>
         <View style={styles.progressTop}>
           <Text style={styles.progressLabel}>Progresso total</Text>
           <Text style={styles.progressValue}>{progress}%</Text>
@@ -474,7 +571,7 @@ export default function LoadingScreen() {
         <Text style={styles.progressFoot}>{doneCount}/{steps.length} etapas concluidas</Text>
       </View>
 
-      <View style={styles.logCard}>
+      <View style={[styles.logCard, isLargeDevice && stylesTv.logCard]}>
         <View style={styles.logHeader}>
           <Text style={styles.logTitle}>Atividade recente</Text>
           <Text style={styles.logCount}>{logs.length} eventos</Text>
@@ -491,7 +588,7 @@ export default function LoadingScreen() {
         )}
       </View>
 
-      <ScrollView style={styles.stepsList} contentContainerStyle={styles.stepsContent}>
+      <ScrollView style={styles.stepsList} contentContainerStyle={[styles.stepsContent, isLargeDevice && stylesTv.stepsContent]}>
         {steps.map((step) => {
           const status = stepStates[step.id] ?? 'pending';
           const isActive = currentStep === step.id && status === 'loading';
@@ -508,17 +605,22 @@ export default function LoadingScreen() {
           return (
             <Animated.View
               key={step.id}
-              style={[styles.stepCard, isActive && styles.stepCardActive, isActive && activePulseStyle]}
+              style={[
+                styles.stepCard,
+                isLargeDevice && stylesTv.stepCard,
+                isActive && styles.stepCardActive,
+                isActive && activePulseStyle,
+              ]}
             >
-              <Animated.View style={[styles.stepIconWrap, isActive && styles.stepIconWrapActive]}>
+              <Animated.View style={[styles.stepIconWrap, isLargeDevice && stylesTv.stepIconWrap, isActive && styles.stepIconWrapActive]}>
                 <MaterialIcons name={iconName as any} size={20} color={iconColor} />
               </Animated.View>
               <View style={styles.stepInfo}>
                 <View style={styles.stepTitleRow}>
-                  <Text style={styles.stepTitle}>{step.title}</Text>
+                  <Text style={[styles.stepTitle, isLargeDevice && stylesTv.stepTitle]}>{step.title}</Text>
                   {isActive ? <Text style={styles.stepBadge}>Agora</Text> : null}
                 </View>
-                <Text style={styles.stepState}>
+                <Text style={[styles.stepState, isLargeDevice && stylesTv.stepState]}>
                   {status === 'pending' && 'Aguardando'}
                   {status === 'loading' && 'Carregando...'}
                   {status === 'done' && 'Concluido'}
@@ -537,7 +639,17 @@ export default function LoadingScreen() {
             <Text style={styles.failureTitle}>Falha na sincronizacao obrigatoria</Text>
             <Text style={styles.failureMessage} numberOfLines={2}>{failure}</Text>
           </View>
-          <TouchableOpacity style={styles.retryBtn} onPress={retry}>
+          <TouchableOpacity
+            style={[
+              styles.retryBtn,
+              isLargeDevice && stylesTv.focusableBtn,
+              isLargeDevice && focusedAction === 'retry' && stylesTv.focusedBtn,
+            ]}
+            onPress={retry}
+            onFocus={() => setFocusedAction('retry')}
+            onBlur={() => setFocusedAction('')}
+            hasTVPreferredFocus={isLargeDevice}
+          >
             <MaterialIcons name="refresh" size={18} color={StreamingTheme.colors.textPrimary} />
             <Text style={styles.retryText}>Tentar novamente</Text>
           </TouchableOpacity>
@@ -546,11 +658,20 @@ export default function LoadingScreen() {
 
       {loadingDone && (
         <TouchableOpacity
-          style={styles.enterBtn}
+          style={[
+            styles.enterBtn,
+            isLargeDevice && stylesTv.focusableBtn,
+            isLargeDevice && focusedAction === 'enter' && stylesTv.focusedBtn,
+          ]}
           onPress={async () => {
             const requireProfileSelection = await shouldRequireProfileSelection();
-            router.replace(requireProfileSelection ? '/perfil-acesso' : '/(tabs)');
+            router.replace(
+              requireProfileSelection ? `/perfil-acesso?next=${profileEntry}` : (homeRoute as any)
+            );
           }}
+          onFocus={() => setFocusedAction('enter')}
+          onBlur={() => setFocusedAction('')}
+          hasTVPreferredFocus={isLargeDevice}
         >
           <LinearGradient colors={StreamingTheme.gradients.accent} style={styles.enterGradient}>
             <Text style={styles.enterText}>Entrar agora</Text>
@@ -911,5 +1032,63 @@ const styles = StyleSheet.create({
     color: StreamingTheme.colors.textPrimary,
     fontWeight: '800',
     fontSize: 16,
+  },
+});
+
+const stylesTv = StyleSheet.create({
+  container: {
+    paddingHorizontal: 38,
+    paddingBottom: 32,
+  },
+  header: {
+    marginTop: 14,
+  },
+  title: {
+    fontSize: 44,
+  },
+  subtitle: {
+    fontSize: 18,
+    lineHeight: 28,
+    maxWidth: 980,
+  },
+  heroCard: {
+    marginBottom: 16,
+  },
+  noticeCard: {
+    padding: 18,
+  },
+  progressCard: {
+    padding: 18,
+  },
+  logCard: {
+    padding: 18,
+  },
+  stepsContent: {
+    gap: 14,
+    paddingBottom: 20,
+  },
+  stepCard: {
+    borderWidth: 2,
+    padding: 16,
+    borderRadius: 18,
+  },
+  stepIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+  },
+  stepTitle: {
+    fontSize: 18,
+  },
+  stepState: {
+    fontSize: 14,
+  },
+  focusableBtn: {
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
+  focusedBtn: {
+    borderWidth: 5,
+    borderColor: StreamingTheme.colors.accentAlt,
   },
 });

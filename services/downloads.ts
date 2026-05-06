@@ -82,6 +82,32 @@ const safeName = (value: string) =>
 
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+function extractFileExtensionFromUrl(url: string, fallback = 'mp4') {
+  const safeFallback = String(fallback || 'mp4').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'mp4';
+  const sanitizeExt = (value: string) => {
+    const ext = String(value || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    return ext.length >= 2 && ext.length <= 5 ? ext : safeFallback;
+  };
+
+  try {
+    const parsed = new URL(String(url || ''));
+    const fileName = String(parsed.pathname || '').split('/').pop() || '';
+    const dot = fileName.lastIndexOf('.');
+    if (dot > 0 && dot < fileName.length - 1) {
+      return sanitizeExt(fileName.slice(dot + 1));
+    }
+    return safeFallback;
+  } catch {
+    const withoutQuery = String(url || '').split('?')[0];
+    const fileName = withoutQuery.split('/').pop() || '';
+    const dot = fileName.lastIndexOf('.');
+    if (dot > 0 && dot < fileName.length - 1) {
+      return sanitizeExt(fileName.slice(dot + 1));
+    }
+    return safeFallback;
+  }
+}
+
 function emitJobs() {
   const snapshot = Array.from(activeJobs.values()).sort((a, b) => a.title.localeCompare(b.title));
   listeners.forEach((listener) => listener(snapshot));
@@ -325,7 +351,7 @@ export async function downloadMovie(input: DownloadMovieInput) {
     return currentJob;
   }
 
-  const extension = sourceUrl.split('?')[0].split('.').pop() || 'mp4';
+  const extension = extractFileExtensionFromUrl(sourceUrl, 'mp4');
   const fileName = `${safeName(input.title)}_${input.contentId}.${extension}`;
   const localUri = `${MOVIES_DIR}/${fileName}`;
   const job: DownloadJob = {
@@ -371,7 +397,7 @@ export async function downloadSeriesEpisode(input: DownloadSeriesEpisodeInput) {
     return currentJob;
   }
 
-  const extension = sourceUrl.split('?')[0].split('.').pop() || input.extension || 'mp4';
+  const extension = extractFileExtensionFromUrl(sourceUrl, input.extension || 'mp4');
   const fileName = `s${String(input.seasonNumber).padStart(2, '0')}e${String(input.episodeNumber).padStart(2, '0')}_${safeName(input.episodeTitle)}.${extension}`;
   const localUri = `${seriesFolder}/${fileName}`;
   const job: DownloadJob = {
@@ -423,4 +449,25 @@ export async function downloadEntireSeries(
     downloaded.push(item);
   }
   return downloaded;
+}
+
+/**
+ * Verifica se um item específico foi baixado
+ */
+export async function isItemDownloaded(contentId: string, type: DownloadedItemType): Promise<boolean> {
+  const items = await loadDownloadedItems();
+  return items.some((item) => item.type === type && item.contentId === contentId);
+}
+
+/**
+ * Retorna todos os itens baixados de um conteúdo (ex: todos os episódios de uma série)
+ */
+export async function getDownloadedItemsByContentId(
+  contentId: string,
+  type?: DownloadedItemType
+): Promise<DownloadedItem[]> {
+  const items = await loadDownloadedItems();
+  return items.filter(
+    (item) => item.contentId === contentId && (!type || item.type === type)
+  );
 }

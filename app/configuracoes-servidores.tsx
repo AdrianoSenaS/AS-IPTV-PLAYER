@@ -1,12 +1,14 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -14,16 +16,18 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { PageLoader } from '@/components/page-loader';
 import { AppBackdrop } from '@/components/app-backdrop';
+import { PageLoader } from '@/components/page-loader';
 import { PlanGateBlur } from '@/components/plan-gate-blur';
 import { StreamingTheme } from '@/constants/streaming-theme';
 import { usePlanGate } from '@/hooks/use-plan-gate';
 import {
   AccountSettingsState,
+  formatXtreamUrlInput,
   loadAccountSettings,
   removeServer,
   setActiveServer,
+  updateServerConnectionSettings,
   upsertServer,
 } from '@/services/account-settings';
 
@@ -37,22 +41,32 @@ const emptyServerForm = {
 
 export default function ConfiguracoesServidoresScreen() {
   const router = useRouter();
-  const { hasFeature, loading: planLoading } = usePlanGate();
+  const { plan, loading: planLoading } = usePlanGate();
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [state, setState] = useState<AccountSettingsState | null>(null);
   const [serverForm, setServerForm] = useState(emptyServerForm);
+  const [allowHttps, setAllowHttps] = useState(false);
 
-  // Locked: pode ver/gerenciar servidores existentes, mas precisa de plano para adicionar mais.
-  const serverLocked = !planLoading && !hasFeature('multi_server') && !serverForm.id;
+  const serverLimitReached =
+    !planLoading &&
+    !!state &&
+    plan?.maxServers !== -1 &&
+    state.servers.length >= Number(plan?.maxServers || 1);
+
+  // Bloqueia somente novo cadastro ao atingir limite do plano.
+  const serverLocked = !!serverLimitReached && !serverForm.id;
 
   const hydrate = useCallback(async () => {
     if (!state) {
       setIsLoading(true);
     }
+
     try {
       const next = await loadAccountSettings();
       setState(next);
+      setAllowHttps(next.serverConnection.allowHttps);
     } finally {
       setIsLoading(false);
     }
@@ -64,23 +78,49 @@ export default function ConfiguracoesServidoresScreen() {
     }, [hydrate])
   );
 
-  const activeServerId = useMemo(() => state?.activeServerId || '', [state]);
-
   const runAction = async (callback: () => Promise<AccountSettingsState>) => {
     try {
       setIsSaving(true);
       const nextState = await callback();
       setState(nextState);
+      setAllowHttps(nextState.serverConnection.allowHttps);
       return nextState;
     } catch (error: any) {
-      Alert.alert('Erro', String(error?.message || error || 'Nao foi possivel salvar.'));
+      Alert.alert('Erro', String(error?.message || error || 'Não foi possível salvar.'));
       return null;
     } finally {
       setIsSaving(false);
     }
   };
 
+  const onToggleHttps = async (value: boolean) => {
+    setAllowHttps(value);
+    setServerForm((prev) => ({ ...prev, url: formatXtreamUrlInput(prev.url, value) }));
+
+    const next = await runAction(() => updateServerConnectionSettings({ allowHttps: value }));
+    if (!next) {
+      setAllowHttps((prev) => !prev);
+      return;
+    }
+
+    Alert.alert(
+      'Protocolo atualizado',
+      value
+        ? 'HTTPS liberado para os servidores Xtream.'
+        : 'HTTP voltou a ser o padrão e URLs HTTPS foram convertidas quando necessário.'
+    );
+  };
+
   const onSaveServer = async () => {
+    if (!serverForm.id && serverLocked) {
+      Alert.alert(
+        'Limite do plano atingido',
+        `Seu plano atual (${plan?.name || 'Atual'}) permite até ${plan?.maxServers === -1 ? 'ilimitado' : plan?.maxServers || 1} servidor(es). Para adicionar outro, faça upgrade.`
+      );
+      router.push({ pathname: '/assinar', params: { feature: 'multi_server', from: 'configuracoes-servidores' } });
+      return;
+    }
+
     const next = await runAction(() =>
       upsertServer(
         {
@@ -95,14 +135,12 @@ export default function ConfiguracoesServidoresScreen() {
 
     if (!next) return;
     setServerForm(emptyServerForm);
-    Alert.alert('Servidor salvo', 'Servidor atualizado com sucesso.');
     router.replace('/loading');
   };
 
   const onActivate = async (serverId: string) => {
     const next = await runAction(() => setActiveServer(serverId));
     if (!next) return;
-    Alert.alert('Servidor ativo', 'Servidor ativado.');
     router.replace('/loading');
   };
 
@@ -160,40 +198,101 @@ export default function ConfiguracoesServidoresScreen() {
           <View style={styles.iconBtn} />
         </View>
 
-        <PlanGateBlur feature="multi_server" locked={serverLocked} style={styles.card}>
-          <View>
-            <Text style={styles.sectionTitle}>{serverForm.id ? 'Editar servidor' : 'Novo servidor'}</Text>
-            <Field label="Nome" placeholder="Casa, Viagem, Backup" value={serverForm.name} onChangeText={(value) => setServerForm((prev) => ({ ...prev, name: value }))} />
-            <Field label="URL" placeholder="https://servidor.com" value={serverForm.url} onChangeText={(value) => setServerForm((prev) => ({ ...prev, url: value }))} />
-            <Field label="Usuario" placeholder="Seu usuario" value={serverForm.username} onChangeText={(value) => setServerForm((prev) => ({ ...prev, username: value }))} />
-            <Field label="Senha" placeholder="Sua senha" value={serverForm.password} onChangeText={(value) => setServerForm((prev) => ({ ...prev, password: value }))} secureTextEntry />
-
-            <View style={styles.row}>
-              <ActionButton text={serverForm.id ? 'Atualizar' : 'Adicionar'} icon="save" onPress={onSaveServer} />
-              {!!serverForm.id && <ActionButton text="Limpar" icon="close" tone="muted" onPress={() => setServerForm(emptyServerForm)} />}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Protocolo padrão</Text>
+          <Text style={styles.sectionText}>
+            O app usa http:// por padrão. Se HTTPS estiver desligado e você digitar https://, a URL é trocada para http:// automaticamente.
+          </Text>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleTextWrap}>
+              <Text style={styles.toggleLabel}>Permitir HTTPS</Text>
+              <Text style={styles.toggleHelper}>
+                Ative apenas quando seu servidor Xtream realmente responder em https://.
+              </Text>
             </View>
+            <Switch
+              value={allowHttps}
+              onValueChange={onToggleHttps}
+              thumbColor={StreamingTheme.colors.textPrimary}
+              trackColor={{ false: 'rgba(255,255,255,0.2)', true: 'rgba(255,122,24,0.55)' }}
+            />
+          </View>
+        </View>
+
+        <PlanGateBlur feature="multi_server" locked={serverLocked} style={styles.card}>
+          <Text style={styles.sectionTitle}>{serverForm.id ? 'Editar servidor' : 'Novo servidor'}</Text>
+          <Text style={styles.sectionText}>
+            A URL sem protocolo sera salva com http://. Use HTTPS somente quando esta configuracao estiver ativa.
+          </Text>
+
+          <Field
+            label="Nome"
+            placeholder="Casa, Viagem, Backup"
+            value={serverForm.name}
+            onChangeText={(value) => setServerForm((prev) => ({ ...prev, name: value }))}
+          />
+          <Field
+            label="URL"
+            placeholder="http://servidor.com"
+            value={serverForm.url}
+            onChangeText={(value) =>
+              setServerForm((prev) => ({
+                ...prev,
+                url: allowHttps ? value : value.replace(/^https:\/\//i, 'http://'),
+              }))
+            }
+            onBlur={() =>
+              setServerForm((prev) => ({
+                ...prev,
+                url: formatXtreamUrlInput(prev.url, allowHttps),
+              }))
+            }
+          />
+          <Field
+            label="Usuário"
+                    placeholder="Seu usuário"
+            value={serverForm.username}
+            onChangeText={(value) => setServerForm((prev) => ({ ...prev, username: value }))}
+          />
+          <Field
+            label="Senha"
+            placeholder="Sua senha"
+            value={serverForm.password}
+            onChangeText={(value) => setServerForm((prev) => ({ ...prev, password: value }))}
+            secureTextEntry
+          />
+
+          <View style={styles.row}>
+            <ActionButton text={serverForm.id ? 'Atualizar' : 'Adicionar'} icon="save" onPress={onSaveServer} />
+            {!!serverForm.id && (
+              <ActionButton text="Limpar" icon="close" tone="muted" onPress={() => setServerForm(emptyServerForm)} />
+            )}
           </View>
         </PlanGateBlur>
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Servidores cadastrados</Text>
-          {state.servers.map((item) => {
-            const active = item.id === activeServerId;
-            return (
-              <View key={item.id} style={[styles.serverRow, active && styles.serverRowActive]}>
-                <View style={styles.serverMain}>
-                  <Text style={styles.serverTitle}>{item.name}</Text>
-                  <Text style={styles.serverSub}>{item.url}</Text>
-                  <Text style={styles.serverSub}>Usuario: {item.username}</Text>
+          {state.servers.length ? (
+            state.servers.map((item) => {
+              const active = item.id === state.activeServerId;
+              return (
+                <View key={item.id} style={[styles.serverRow, active && styles.serverRowActive]}>
+                  <View style={styles.serverMain}>
+                    <Text style={styles.serverTitle}>{item.name}</Text>
+                    <Text style={styles.serverSub}>{item.url}</Text>
+                    <Text style={styles.serverSub}>Usuário: {item.username}</Text>
+                  </View>
+                  <View style={styles.actions}>
+                    {!active && <TinyAction text="Ativar" onPress={() => onActivate(item.id)} />}
+                    <TinyAction text="Editar" onPress={() => onEdit(item.id)} />
+                    <TinyAction text="Excluir" danger onPress={() => onDelete(item.id)} />
+                  </View>
                 </View>
-                <View style={styles.actions}>
-                  {!active && <TinyAction text="Ativar" onPress={() => onActivate(item.id)} />}
-                  <TinyAction text="Editar" onPress={() => onEdit(item.id)} />
-                  <TinyAction text="Excluir" danger onPress={() => onDelete(item.id)} />
-                </View>
-              </View>
-            );
-          })}
+              );
+            })
+          ) : (
+            <Text style={styles.emptyText}>Nenhum servidor salvo ainda.</Text>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -206,12 +305,14 @@ function Field({
   value,
   onChangeText,
   secureTextEntry = false,
+  onBlur,
 }: {
   label: string;
   placeholder: string;
   value: string;
   onChangeText: (value: string) => void;
   secureTextEntry?: boolean;
+  onBlur?: () => void;
 }) {
   return (
     <View>
@@ -224,6 +325,7 @@ function Field({
         onChangeText={onChangeText}
         secureTextEntry={secureTextEntry}
         autoCapitalize="none"
+        onBlur={onBlur}
       />
     </View>
   );
@@ -303,104 +405,138 @@ const styles = StyleSheet.create({
     fontSize: 24,
   },
   card: {
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: StreamingTheme.colors.border,
     backgroundColor: 'rgba(16,21,37,0.86)',
-    padding: 12,
-    gap: 8,
+    padding: 14,
+    gap: 10,
   },
   sectionTitle: {
     color: StreamingTheme.colors.textPrimary,
     fontWeight: '900',
-    fontSize: 16,
+    fontSize: 17,
+  },
+  sectionText: {
+    color: StreamingTheme.colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  toggleRow: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  toggleTextWrap: {
+    flex: 1,
+    gap: 4,
+  },
+  toggleLabel: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  toggleHelper: {
+    color: StreamingTheme.colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
   label: {
     color: StreamingTheme.colors.textSecondary,
-    fontSize: 12,
-    marginBottom: 4,
+    marginBottom: 8,
+    fontSize: 13,
     fontWeight: '700',
   },
   input: {
-    borderRadius: 12,
+    minHeight: 50,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: StreamingTheme.colors.border,
     backgroundColor: StreamingTheme.colors.surface,
-    height: 46,
-    paddingHorizontal: 12,
     color: StreamingTheme.colors.textPrimary,
+    paddingHorizontal: 14,
+    fontSize: 15,
   },
   row: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   button: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,59,48,0.5)',
-    backgroundColor: 'rgba(255,59,48,0.24)',
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: '#FF7A18',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
+    gap: 8,
   },
   buttonMuted: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
     borderColor: StreamingTheme.colors.border,
-    backgroundColor: StreamingTheme.colors.surface,
   },
   buttonText: {
     color: StreamingTheme.colors.textPrimary,
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 15,
   },
   serverRow: {
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: StreamingTheme.colors.border,
-    backgroundColor: StreamingTheme.colors.surfaceAlt,
-    padding: 10,
-    marginTop: 2,
-    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    padding: 12,
+    gap: 12,
   },
   serverRowActive: {
-    borderColor: 'rgba(255,59,48,0.55)',
-    backgroundColor: 'rgba(255,59,48,0.16)',
+    borderColor: 'rgba(255,122,24,0.45)',
+    backgroundColor: 'rgba(255,122,24,0.10)',
   },
-  serverMain: { gap: 3 },
+  serverMain: {
+    gap: 4,
+  },
   serverTitle: {
     color: StreamingTheme.colors.textPrimary,
     fontWeight: '800',
-    fontSize: 14,
+    fontSize: 15,
   },
   serverSub: {
-    color: StreamingTheme.colors.textMuted,
-    fontSize: 11,
+    color: StreamingTheme.colors.textSecondary,
+    fontSize: 13,
   },
   actions: {
     flexDirection: 'row',
-    gap: 7,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   tinyBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: StreamingTheme.colors.border,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
   tinyBtnDanger: {
-    borderColor: 'rgba(255,59,48,0.5)',
-    backgroundColor: 'rgba(255,59,48,0.2)',
+    borderColor: 'rgba(255,107,107,0.35)',
+    backgroundColor: 'rgba(255,107,107,0.08)',
   },
   tinyBtnText: {
-    color: StreamingTheme.colors.textSecondary,
+    color: StreamingTheme.colors.textPrimary,
     fontWeight: '700',
-    fontSize: 11,
+    fontSize: 12,
   },
   tinyBtnTextDanger: {
-    color: StreamingTheme.colors.textPrimary,
+    color: '#FF9B9B',
+  },
+  emptyText: {
+    color: StreamingTheme.colors.textSecondary,
+    fontSize: 13,
   },
 });

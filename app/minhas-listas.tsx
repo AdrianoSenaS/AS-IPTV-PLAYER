@@ -1,4 +1,5 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -132,64 +133,92 @@ export default function MinhasListasScreen() {
         <FlatList
           data={filtered}
           keyExtractor={(item) => item.id}
-          numColumns={2}
           contentContainerStyle={styles.listContent}
-          columnWrapperStyle={styles.columnWrap}
           renderItem={({ item }) => {
           const isRenaming = renamingId === item.id;
+          const previewImages = item.items.filter((li) => !!li.image).slice(0, 4);
+          const cells = [0, 1, 2, 3].map((idx) => previewImages[idx]?.image ?? null);
+          const hasAnyImage = previewImages.length > 0;
           const previewTitle = item.items[0]?.title || 'Sua playlist ainda esta vazia';
           const previewSubtitle = item.items[1]?.title || 'Toque para abrir e adicionar filmes, series e TV';
           return (
             <TouchableOpacity
               style={styles.card}
               onPress={() => router.push(`/minha-lista-detalhe?listId=${encodeURIComponent(item.id)}` as any)}>
-              <View style={styles.cardArt}>
-                <MaterialIcons name="queue-music" size={26} color={StreamingTheme.colors.textPrimary} />
-              </View>
-              {isRenaming ? (
-                <View style={styles.renameWrap}>
-                  <TextInput
-                    style={styles.renameInput}
-                    value={renameValue}
-                    onChangeText={setRenameValue}
-                    placeholder="Novo nome"
-                    placeholderTextColor={StreamingTheme.colors.textMuted}
-                  />
-                  <View style={styles.renameActions}>
-                    <TouchableOpacity style={styles.renameAction} onPress={onConfirmRename}>
-                      <MaterialIcons name="check" size={16} color={StreamingTheme.colors.textPrimary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.renameAction}
-                      onPress={() => {
-                        setRenamingId('');
-                        setRenameValue('');
-                      }}>
-                      <MaterialIcons name="close" size={16} color={StreamingTheme.colors.textPrimary} />
-                    </TouchableOpacity>
-                  </View>
+              {!isRenaming && (
+                <View style={styles.collageWrap}>
+                  {hasAnyImage ? (
+                    <>
+                      <View style={styles.collageRow}>
+                        <View style={styles.collageCell}>
+                          {cells[0] ? <Image source={{ uri: cells[0] }} style={styles.collageImg} cachePolicy="memory-disk" /> : <View style={styles.collagePlaceholder} />}
+                        </View>
+                        <View style={styles.collageCell}>
+                          {cells[1] ? <Image source={{ uri: cells[1] }} style={styles.collageImg} cachePolicy="memory-disk" /> : <View style={styles.collagePlaceholder} />}
+                        </View>
+                      </View>
+                      <View style={styles.collageRow}>
+                        <View style={styles.collageCell}>
+                          {cells[2] ? <Image source={{ uri: cells[2] }} style={styles.collageImg} cachePolicy="memory-disk" /> : <View style={styles.collagePlaceholder} />}
+                        </View>
+                        <View style={styles.collageCell}>
+                          {cells[3] ? <Image source={{ uri: cells[3] }} style={styles.collageImg} cachePolicy="memory-disk" /> : <View style={styles.collagePlaceholder} />}
+                        </View>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={styles.collageEmpty}>
+                      <MaterialIcons name="queue-music" size={36} color={StreamingTheme.colors.textPrimary} />
+                    </View>
+                  )}
                 </View>
-              ) : (
-                <>
-                  <Text style={styles.cardTitleMain} numberOfLines={2}>{item.name}</Text>
-                  <Text style={styles.cardMeta}>{item.items.length} itens</Text>
-                  <Text style={styles.previewTitle} numberOfLines={1}>{previewTitle}</Text>
-                  <Text style={styles.previewSub} numberOfLines={2}>{previewSubtitle}</Text>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity
-                      style={styles.miniBtn}
-                      onPress={() => {
-                        setRenamingId(item.id);
-                        setRenameValue(item.name);
-                      }}>
-                      <MaterialIcons name="edit" size={16} color={StreamingTheme.colors.textPrimary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.miniBtn} onPress={() => onDeleteList(item.id)}>
-                      <MaterialIcons name="delete-outline" size={16} color={StreamingTheme.colors.textPrimary} />
-                    </TouchableOpacity>
-                  </View>
-                </>
               )}
+              <View style={styles.cardContent}>
+                {isRenaming ? (
+                  <View style={styles.renameWrap}>
+                    <TextInput
+                      style={styles.renameInput}
+                      value={renameValue}
+                      onChangeText={setRenameValue}
+                      placeholder="Novo nome"
+                      placeholderTextColor={StreamingTheme.colors.textMuted}
+                    />
+                    <View style={styles.renameActions}>
+                      <TouchableOpacity style={styles.renameAction} onPress={onConfirmRename}>
+                        <MaterialIcons name="check" size={16} color={StreamingTheme.colors.textPrimary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.renameAction}
+                        onPress={() => {
+                          setRenamingId('');
+                          setRenameValue('');
+                        }}>
+                        <MaterialIcons name="close" size={16} color={StreamingTheme.colors.textPrimary} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.cardTitleMain} numberOfLines={2}>{item.name}</Text>
+                    <Text style={styles.cardMeta}>{item.items.length} itens</Text>
+                    <Text style={styles.previewTitle} numberOfLines={1}>{previewTitle}</Text>
+                    <Text style={styles.previewSub} numberOfLines={2}>{previewSubtitle}</Text>
+                    <View style={styles.cardActions}>
+                      <TouchableOpacity
+                        style={styles.miniBtn}
+                        onPress={() => {
+                          setRenamingId(item.id);
+                          setRenameValue(item.name);
+                        }}>
+                        <MaterialIcons name="edit" size={16} color={StreamingTheme.colors.textPrimary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.miniBtn} onPress={() => onDeleteList(item.id)}>
+                        <MaterialIcons name="delete-outline" size={16} color={StreamingTheme.colors.textPrimary} />
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </View>
             </TouchableOpacity>
           );
         }}
@@ -303,19 +332,15 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
     paddingBottom: 120,
-  },
-  columnWrap: {
-    justifyContent: 'space-between',
-    marginBottom: 14,
+    gap: 14,
   },
   card: {
-    width: '48%',
+    width: '100%',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: StreamingTheme.colors.border,
     backgroundColor: StreamingTheme.colors.surface,
-    padding: 12,
-    minHeight: 208,
+    overflow: 'hidden',
   },
   cardArt: {
     height: 86,
@@ -324,6 +349,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
+  },
+  cardContent: {
+    padding: 12,
+    gap: 4,
+  },
+  collageWrap: {
+    width: '100%',
+    gap: 2,
+    backgroundColor: 'rgba(16,21,37,1)',
+  },
+  collageRow: {
+    flexDirection: 'row',
+    height: 100,
+    gap: 2,
+  },
+  collageCell: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+  collageImg: {
+    width: '100%',
+    height: '100%',
+  },
+  collagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  collageEmpty: {
+    height: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,59,48,0.22)',
   },
   cardTitleMain: {
     color: StreamingTheme.colors.textPrimary,
@@ -349,7 +407,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   cardActions: {
-    marginTop: 'auto',
+    marginTop: 8,
     flexDirection: 'row',
     gap: 8,
   },

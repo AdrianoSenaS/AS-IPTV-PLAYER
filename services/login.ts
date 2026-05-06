@@ -1,9 +1,10 @@
 import { setDbValue } from '@/services/local-db';
-import { syncServerFromLogin } from '@/services/account-settings';
+import { normalizeXtreamServerUrl, syncServerFromLogin } from '@/services/account-settings';
 
 export const LoginUserStream = async (username:any, user: any, password: any, url: any) => {
     try {
-        const urlApi = `${url}/player_api.php?username=${user}&password=${password}`;
+        const normalizedUrl = await normalizeXtreamServerUrl(String(url || ''));
+        const urlApi = `${normalizedUrl}/player_api.php?username=${user}&password=${password}`;
         const response = await fetch(urlApi);
         if (!response.ok)
             return `HTTP error! Status: ${response.status}`
@@ -17,14 +18,14 @@ export const LoginUserStream = async (username:any, user: any, password: any, ur
                 setDbValue('name', username),
                 setDbValue('username', user),
                 setDbValue('password', password),
-                setDbValue('url', url),
+                setDbValue('url', normalizedUrl),
                 setDbValue('userInfo', JSON.stringify(userInfo)),
                 setDbValue('serverInfo', JSON.stringify(serverInfo)),
                 setDbValue('session.server.credentials.v1', {
                     name: username,
                     username: user,
                     password,
-                    url,
+                    url: normalizedUrl,
                     userInfo,
                     serverInfo,
                     savedAt: new Date().toISOString(),
@@ -32,7 +33,7 @@ export const LoginUserStream = async (username:any, user: any, password: any, ur
             ]);
             await syncServerFromLogin({
                 displayName: username,
-                url,
+                url: normalizedUrl,
                 username: user,
                 password,
             })

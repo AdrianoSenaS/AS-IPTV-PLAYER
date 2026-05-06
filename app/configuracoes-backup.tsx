@@ -1,4 +1,5 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
@@ -16,22 +17,39 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PageLoader } from '@/components/page-loader';
 import { AppBackdrop } from '@/components/app-backdrop';
+import {
+  BACKUP_INTERVAL_LABELS,
+  BackupSyncInterval,
+  loadAutomationSettings,
+  saveAutomationSettings,
+  SMART_NOTIFICATION_INTERVAL_LABELS,
+  SmartNotificationInterval,
+} from '@/services/automation-settings';
 import { StreamingTheme } from '@/constants/streaming-theme';
+import { loadAccountSettings } from '@/services/account-settings';
+import {
+  BackupHistoryEntry,
+  BackupJobState,
+  getBackupHistory,
+  scheduleAutoCloudBackup,
+  startCloudBackupInBackground,
+  startCloudRestoreInBackground,
+  subscribeToBackupJob,
+} from '@/services/backup-background';
+import { getCatalogLastUpdate } from '@/services/catalog-data';
 import {
   loadCloudSyncPrefs,
   loadUserSession,
-  restoreLastCloudBackup,
-  runCloudBackupNow,
   saveCloudSyncPrefs,
 } from '@/services/cloud-sync';
 import {
-  getCatalogLastUpdate,
   CatalogRefreshPeriod,
   getNextCatalogRefreshAt,
   loadCatalogRefreshPeriod,
   REFRESH_PERIOD_LABELS,
   saveCatalogRefreshPeriod,
 } from '@/services/update-schedule';
+import { refreshSmartRecommendationNotifications } from '@/services/smart-notifications';
 
 export default function ConfiguracoesBackupScreen() {
   const router = useRouter();
@@ -41,9 +59,21 @@ export default function ConfiguracoesBackupScreen() {
   const [consentEnabled, setConsentEnabled] = useState(false);
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   const [refreshPeriod, setRefreshPeriod] = useState<CatalogRefreshPeriod>('2d');
+  const [backupSyncInterval, setBackupSyncInterval] = useState<BackupSyncInterval>('3h');
+  const [smartNotificationsEnabled, setSmartNotificationsEnabled] = useState(true);
+  const [smartNotificationInterval, setSmartNotificationInterval] = useState<SmartNotificationInterval>('12h');
   const [lastCatalogSyncAt, setLastCatalogSyncAt] = useState<string | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState('');
   const [sessionEmail, setSessionEmail] = useState('');
+  const [activeProfileName, setActiveProfileName] = useState('Principal');
+  const [backupJob, setBackupJob] = useState<BackupJobState>({
+    operation: 'idle',
+    isRunning: false,
+    progress: 0,
+    message: '',
+    stage: 'idle',
+  });
+  const [history, setHistory] = useState<BackupHistoryEntry[]>([]);
   const hydratedOnceRef = useRef(false);
 
   const hydrate = useCallback(async () => {
@@ -51,18 +81,27 @@ export default function ConfiguracoesBackupScreen() {
       setIsLoading(true);
     }
     try {
-      const [prefs, session, selectedPeriod, localCatalogLastUpdate] = await Promise.all([
+      const [prefs, session, selectedPeriod, localCatalogLastUpdate, historyEntries, settings, automation] = await Promise.all([
         loadCloudSyncPrefs(),
         loadUserSession(),
         loadCatalogRefreshPeriod(),
         getCatalogLastUpdate(),
+        getBackupHistory(),
+        loadAccountSettings(),
+        loadAutomationSettings(),
       ]);
+      const activeProfile = settings.profiles.find((item) => item.id === settings.activeProfileId);
       setConsentEnabled(prefs.consentEnabled);
       setAutoSyncEnabled(prefs.autoSyncEnabled);
       setLastSyncAt(prefs.lastSyncAt);
       setRefreshPeriod(selectedPeriod);
+      setBackupSyncInterval(automation.backupSyncInterval);
+      setSmartNotificationsEnabled(automation.smartNotificationsEnabled);
+      setSmartNotificationInterval(automation.smartNotificationInterval);
       setLastCatalogSyncAt(localCatalogLastUpdate);
       setSessionEmail(session?.user.email || 'Sem login');
+      setActiveProfileName(activeProfile?.name || 'Principal');
+      setHistory(historyEntries);
     } finally {
       hydratedOnceRef.current = true;
       setIsLoading(false);
@@ -75,12 +114,40 @@ export default function ConfiguracoesBackupScreen() {
     }, [hydrate])
   );
 
+  React.useEffect(() => {
+    return subscribeToBackupJob((state) => {
+      setBackupJob(state);
+      if (state.syncedAt) {
+        setLastSyncAt(state.syncedAt);
+      }
+      if (!state.isRunning && state.stage !== 'idle') {
+        void getBackupHistory().then(setHistory).catch(() => null);
+      }
+    });
+  }, []);
+
+  const autoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    if (backupJob.stage === 'done') {
+      autoClearTimerRef.current = setTimeout(() => {
+        setBackupJob((prev) =>
+          prev.stage === 'done' ? { ...prev, stage: 'idle', isRunning: false } : prev
+        );
+      }, 4000);
+    }
+    return () => {
+      if (autoClearTimerRef.current) clearTimeout(autoClearTimerRef.current);
+    };
+  }, [backupJob.stage]);
+
+  const actionButtonsDisabled = backupJob.isRunning || isSaving;
+
   const runAction = async (action: () => Promise<void>) => {
     try {
       setIsSaving(true);
       await action();
     } catch (error: any) {
-      Alert.alert('Erro', String(error?.message || error || 'Nao foi possivel executar a operacao.'));
+      Alert.alert('Erro', String(error?.message || error || 'Não foi possível executar a operação.'));
     } finally {
       setIsSaving(false);
     }
@@ -103,12 +170,24 @@ export default function ConfiguracoesBackupScreen() {
   };
 
   const onBackupNow = async () => {
-    await runAction(async () => {
-      const result = await runCloudBackupNow();
-      setLastSyncAt(result.syncedAt);
-      setLastCatalogSyncAt(await getCatalogLastUpdate());
-      Alert.alert('Backup concluido', `Backup salvo em: ${result.backupFile}`);
-    });
+    if (backupJob.isRunning) {
+      Alert.alert('Processo em andamento', 'Já existe uma sincronização rodando em segundo plano.');
+      return;
+    }
+
+    startCloudBackupInBackground()
+      .then(async (result) => {
+        setLastSyncAt(result.syncedAt || '');
+        setLastCatalogSyncAt(await getCatalogLastUpdate());
+      })
+      .catch((error: any) => {
+        Alert.alert('Erro', String(error?.message || error || 'Não foi possível concluir o backup.'));
+      });
+
+    Alert.alert(
+      'Backup iniciado',
+          'O backup está rodando em segundo plano. Você pode continuar usando o app enquanto acompanha o progresso pelas notificações.'
+    );
   };
 
   const onRestore = async () => {
@@ -118,11 +197,24 @@ export default function ConfiguracoesBackupScreen() {
         text: 'Restaurar',
         style: 'destructive',
         onPress: async () => {
-          await runAction(async () => {
-            const result = await restoreLastCloudBackup();
-            setLastSyncAt(result.restoredAt);
-            Alert.alert('Restore concluido', `Backup de ${new Date(result.sourceCreatedAt).toLocaleString('pt-BR')} restaurado.`);
-          });
+          if (backupJob.isRunning) {
+            Alert.alert('Processo em andamento', 'Já existe uma sincronização rodando em segundo plano.');
+            return;
+          }
+
+          startCloudRestoreInBackground()
+            .then(async (result) => {
+              setLastSyncAt(result.syncedAt || '');
+              setLastCatalogSyncAt(await getCatalogLastUpdate());
+            })
+            .catch((error: any) => {
+              Alert.alert('Erro', String(error?.message || error || 'Não foi possível concluir a restauração.'));
+            });
+
+          Alert.alert(
+            'Restauração iniciada',
+            'A restauração está rodando em segundo plano. Acompanhe o andamento pelas notificações.'
+          );
         },
       },
     ]);
@@ -137,6 +229,33 @@ export default function ConfiguracoesBackupScreen() {
     await runAction(async () => {
       const saved = await saveCatalogRefreshPeriod(nextPeriod);
       setRefreshPeriod(saved);
+    });
+  };
+
+  const onChangeBackupInterval = async (nextInterval: BackupSyncInterval) => {
+    setBackupSyncInterval(nextInterval);
+    await runAction(async () => {
+      const saved = await saveAutomationSettings({ backupSyncInterval: nextInterval });
+      setBackupSyncInterval(saved.backupSyncInterval);
+      scheduleAutoCloudBackup();
+    });
+  };
+
+  const onToggleSmartNotifications = async (value: boolean) => {
+    setSmartNotificationsEnabled(value);
+    await runAction(async () => {
+      const saved = await saveAutomationSettings({ smartNotificationsEnabled: value });
+      setSmartNotificationsEnabled(saved.smartNotificationsEnabled);
+      await refreshSmartRecommendationNotifications();
+    });
+  };
+
+  const onChangeSmartNotificationInterval = async (nextInterval: SmartNotificationInterval) => {
+    setSmartNotificationInterval(nextInterval);
+    await runAction(async () => {
+      const saved = await saveAutomationSettings({ smartNotificationInterval: nextInterval });
+      setSmartNotificationInterval(saved.smartNotificationInterval);
+      await refreshSmartRecommendationNotifications();
     });
   };
 
@@ -155,7 +274,7 @@ export default function ConfiguracoesBackupScreen() {
           </TouchableOpacity>
           <View style={styles.headerTextWrap}>
             <Text style={styles.kicker}>NUVEM LOCAL</Text>
-            <Text style={styles.title}>Backup e sincronizacao</Text>
+            <Text style={styles.title}>Backup e sincronização</Text>
           </View>
           <View style={styles.iconBtn} />
         </View>
@@ -163,9 +282,35 @@ export default function ConfiguracoesBackupScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Conta conectada</Text>
           <Text style={styles.infoText}>{sessionEmail}</Text>
+          <Text style={styles.infoText}>Perfil ativo agora: {activeProfileName}</Text>
           <Text style={styles.infoText}>
-            Ultima sincronizacao: {lastSyncAt ? new Date(lastSyncAt).toLocaleString('pt-BR') : 'Nunca'}
+            Última sincronização: {lastSyncAt ? new Date(lastSyncAt).toLocaleString('pt-BR') : 'Nunca'}
           </Text>
+          {backupJob.stage !== 'idle' ? (
+            <View style={styles.progressCard}>
+              <View style={styles.progressHeader}>
+                <Text style={styles.progressTitle}>
+                  {backupJob.operation === 'restore' ? 'Restauração em segundo plano' : 'Backup em segundo plano'}
+                </Text>
+                <Text style={styles.progressPercent}>{backupJob.progress}%</Text>
+              </View>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.max(6, Math.min(100, backupJob.progress))}%` }]} />
+              </View>
+              <Text style={styles.progressInfoText}>{backupJob.message}</Text>
+              {backupJob.activeProfileName ? (
+                <Text style={styles.caption}>Perfil afetado: {backupJob.activeProfileName}</Text>
+              ) : null}
+              {!backupJob.isRunning && backupJob.operation === 'restore' && backupJob.sourceCreatedAt ? (
+                <Text style={styles.caption}>
+                  Origem restaurada: {new Date(backupJob.sourceCreatedAt).toLocaleString('pt-BR')}
+                </Text>
+              ) : null}
+              {!backupJob.isRunning && backupJob.stage === 'error' && backupJob.error ? (
+                <Text style={styles.progressErrorText}>{backupJob.error}</Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.card}>
@@ -181,15 +326,95 @@ export default function ConfiguracoesBackupScreen() {
             onValueChange={onToggleAutoSync}
           />
           <Text style={styles.caption}>
-            Dados incluidos: filmes/series assistidos, listas, servidores Xtream, perfis e configuracoes parentais.
+            Dados incluidos: filmes/series assistidos, listas, recomendacoes, perfis, PINs, fotos e configuracoes parentais.
           </Text>
+
+          <Text style={[styles.sectionTitle, { marginTop: 14 }]}>Intervalo do backup automatico</Text>
+          <Text style={styles.caption}>Escolha de quanto em quanto tempo a sincronizacao automatica pode rodar.</Text>
+          <View style={styles.periodGrid}>
+            {(Object.keys(BACKUP_INTERVAL_LABELS) as BackupSyncInterval[]).map((intervalKey) => {
+              const active = backupSyncInterval === intervalKey;
+              return (
+                <TouchableOpacity
+                  key={intervalKey}
+                  style={[styles.periodChip, active && styles.periodChipActive]}
+                  onPress={() => onChangeBackupInterval(intervalKey)}
+                >
+                  <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>
+                    {BACKUP_INTERVAL_LABELS[intervalKey]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Notificacoes inteligentes</Text>
+          <ToggleRow
+            label="Receber sugestoes de filmes e series"
+            value={smartNotificationsEnabled}
+            onValueChange={onToggleSmartNotifications}
+          />
+          <Text style={styles.caption}>As recomendacoes usam o algoritmo para sugerir conteudos com descricao personalizada.</Text>
+          <Text style={[styles.sectionTitle, { marginTop: 12 }]}>Intervalo das notificacoes</Text>
+          <View style={styles.periodGrid}>
+            {(Object.keys(SMART_NOTIFICATION_INTERVAL_LABELS) as SmartNotificationInterval[]).map((intervalKey) => {
+              const active = smartNotificationInterval === intervalKey;
+              return (
+                <TouchableOpacity
+                  key={intervalKey}
+                  style={[styles.periodChip, active && styles.periodChipActive]}
+                  onPress={() => onChangeSmartNotificationInterval(intervalKey)}
+                  disabled={!smartNotificationsEnabled}
+                >
+                  <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>
+                    {SMART_NOTIFICATION_INTERVAL_LABELS[intervalKey]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Acoes</Text>
-          <ActionButton text="Sincronizar agora" icon="sync" onPress={onSyncNow} />
-          <ActionButton text="Criar backup agora" icon="backup" onPress={onBackupNow} tone="muted" />
-          <ActionButton text="Restaurar ultimo backup" icon="restore" onPress={onRestore} tone="muted" />
+          <ActionButton text="Sincronizar agora" icon="sync" onPress={onSyncNow} disabled={actionButtonsDisabled} />
+          <ActionButton text="Criar backup agora" icon="backup" onPress={onBackupNow} tone="muted" disabled={actionButtonsDisabled} />
+          <ActionButton text="Restaurar ultimo backup" icon="restore" onPress={onRestore} tone="muted" disabled={actionButtonsDisabled} />
+          {backupJob.isRunning ? <Text style={styles.caption}>As acoes ficam bloqueadas ate o processo atual terminar.</Text> : null}
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Historico recente</Text>
+          {history.length ? (
+            history.map((entry) => {
+              const success = entry.status === 'success';
+              const label = entry.operation === 'restore' ? 'Restauracao' : 'Backup';
+              const originLine =
+                entry.operation === 'restore' && entry.sourceCreatedAt
+                  ? `Origem: backup de ${new Date(entry.sourceCreatedAt).toLocaleString('pt-BR')}`
+                  : entry.operation === 'backup' && entry.backupFile
+                  ? `Arquivo: ${entry.backupFile.split('/').pop()}`
+                  : null;
+              return (
+                <View key={entry.id} style={styles.historyRow}>
+                  <View style={[styles.historyDot, success ? styles.historyDotSuccess : styles.historyDotError]} />
+                  <View style={styles.historyContent}>
+                    <Text style={styles.historyTitle}>
+                      {label} {success ? 'concluido' : 'com falha'}
+                    </Text>
+                    <Text style={styles.infoText}>{new Date(entry.finishedAt).toLocaleString('pt-BR')}</Text>
+                    {entry.activeProfileName ? <Text style={styles.caption}>Perfil: {entry.activeProfileName}</Text> : null}
+                    <Text style={styles.caption}>{entry.message}</Text>
+                    {originLine ? <Text style={styles.caption}>{originLine}</Text> : null}
+                  </View>
+                </View>
+              );
+            })
+          ) : (
+            <Text style={styles.caption}>Nenhuma execucao registrada ainda.</Text>
+          )}
         </View>
 
         <View style={styles.card}>
@@ -252,15 +477,21 @@ function ActionButton({
   icon,
   onPress,
   tone = 'primary',
+  disabled = false,
 }: {
   text: string;
   icon: keyof typeof MaterialIcons.glyphMap;
   onPress: () => void;
   tone?: 'primary' | 'muted';
+  disabled?: boolean;
 }) {
   const isPrimary = tone === 'primary';
   return (
-    <TouchableOpacity style={[styles.button, !isPrimary && styles.buttonMuted]} onPress={onPress}>
+    <TouchableOpacity
+      style={[styles.button, !isPrimary && styles.buttonMuted, disabled && styles.buttonDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+    >
       <MaterialIcons name={icon} size={18} color={StreamingTheme.colors.textPrimary} />
       <Text style={styles.buttonText}>{text}</Text>
     </TouchableOpacity>
@@ -321,6 +552,53 @@ const styles = StyleSheet.create({
     color: StreamingTheme.colors.textSecondary,
     fontSize: 12,
   },
+  progressInfoText: {
+    color: StreamingTheme.colors.accentAlt,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  progressCard: {
+    marginTop: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(93,169,255,0.32)',
+    backgroundColor: 'rgba(93,169,255,0.08)',
+    padding: 10,
+    gap: 8,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  progressTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '800',
+    flex: 1,
+  },
+  progressPercent: {
+    color: StreamingTheme.colors.accentAlt,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: StreamingTheme.colors.accentAlt,
+  },
+  progressErrorText: {
+    color: '#FF8A80',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   caption: {
     color: StreamingTheme.colors.textMuted,
     fontSize: 11,
@@ -359,10 +637,44 @@ const styles = StyleSheet.create({
     borderColor: StreamingTheme.colors.border,
     backgroundColor: StreamingTheme.colors.surface,
   },
+  buttonDisabled: {
+    opacity: 0.45,
+  },
   buttonText: {
     color: StreamingTheme.colors.textPrimary,
     fontWeight: '800',
     fontSize: 12,
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    padding: 10,
+  },
+  historyDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    marginTop: 4,
+  },
+  historyDotSuccess: {
+    backgroundColor: '#59D98E',
+  },
+  historyDotError: {
+    backgroundColor: '#FF8A80',
+  },
+  historyContent: {
+    flex: 1,
+    gap: 2,
+  },
+  historyTitle: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '800',
   },
   periodGrid: {
     marginTop: 6,

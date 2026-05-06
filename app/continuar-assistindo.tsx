@@ -1,5 +1,6 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
+import { Image } from 'expo-image';
+
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -38,6 +39,7 @@ type ContinueItem = {
   subtitle: string;
   image: string;
   progress: number;
+  positionMs?: number;
   updatedAt: string;
   streamId?: string;
   seriesId?: string;
@@ -106,6 +108,7 @@ export default function ContinuarAssistindoScreen() {
           subtitle: mins > 0 ? `Retomar em ${mins} min` : 'Continuar assistindo',
           image: toText(movie.stream_icon || movie.cover),
           progress: state.progressPercent,
+          positionMs: state.positionMs,
           updatedAt: state.updatedAt,
           streamId: movieId,
         };
@@ -132,6 +135,7 @@ export default function ContinuarAssistindoScreen() {
           subtitle: `Temporada ${season}, Ep. ${episode}`,
           image: toText(series.stream_icon || series.cover),
           progress: episodeState.progress,
+          positionMs: episodeState.positionMs,
           updatedAt: episodeState.updatedAt,
           seriesId,
           seasonEp: `S${season} E${episode}`,
@@ -162,7 +166,13 @@ export default function ContinuarAssistindoScreen() {
 
   const openItem = (item: ContinueItem) => {
     if (item.type === 'movie' && item.streamId) {
-      router.navigate(`/filme-detalhe?streamId=${encodeURIComponent(item.streamId)}` as any);
+      router.navigate({
+        pathname: '/filme-detalhe',
+        params: {
+          streamId: item.streamId,
+          startPositionMs: String(item.positionMs || 0),
+        },
+      } as any);
       return;
     }
     if (item.type === 'series' && item.seriesId) {
@@ -173,6 +183,7 @@ export default function ContinuarAssistindoScreen() {
           seriesId: item.seriesId,
           title: item.title,
           cover: toText(series?.stream_icon || series?.cover),
+          startPositionMs: String(item.positionMs || 0),
         },
       });
     }

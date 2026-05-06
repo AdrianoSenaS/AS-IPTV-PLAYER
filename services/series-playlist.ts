@@ -6,6 +6,7 @@ export type PlaylistItem = {
   extension: string;
   seasonNumber: number;
   episodeNumber: number;
+  durationMs?: number;
 };
 
 export async function saveSeriesPlaylist(key: string, items: PlaylistItem[]) {

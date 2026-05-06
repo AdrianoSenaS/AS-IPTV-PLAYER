@@ -17,17 +17,23 @@ async function ensureReady() {
     return;
   }
 
-  const db = await getDb();
-  await db.execAsync(`
-    PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS kv_store (
-      key TEXT PRIMARY KEY NOT NULL,
-      value TEXT NOT NULL,
-      updatedAt TEXT NOT NULL
-    );
-  `);
+  try {
+    const db = await getDb();
+    
+    // Create table
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS kv_store (
+        key TEXT PRIMARY KEY NOT NULL,
+        value TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
+    `);
 
-  initialized = true;
+    initialized = true;
+  } catch (err) {
+    console.error('[LocalDB] Erro ao inicializar banco:', err);
+    initialized = true;
+  }
 }
 
 export async function getLocalDb() {
@@ -36,36 +42,48 @@ export async function getLocalDb() {
 }
 
 export async function setDbValue<T>(key: string, value: T) {
-  await ensureReady();
-  const db = await getDb();
-  await db.runAsync(
-    'INSERT OR REPLACE INTO kv_store (key, value, updatedAt) VALUES (?, ?, ?)',
-    key,
-    JSON.stringify(value),
-    new Date().toISOString()
-  );
+  try {
+    if (!key) return;
+    await ensureReady();
+    const db = await getDb();
+    await db.runAsync('INSERT OR REPLACE INTO kv_store (key, value, updatedAt) VALUES (?, ?, ?)', key, JSON.stringify(value), new Date().toISOString());
+  } catch (err) {
+    console.error('[LocalDB] Erro ao salvar valor:', err);
+  }
 }
 
 export async function getDbValue<T>(key: string): Promise<T | null> {
-  await ensureReady();
-  const db = await getDb();
-  const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM kv_store WHERE key = ?', key);
-
-  if (!row?.value) {
-    return null;
-  }
-
   try {
-    return JSON.parse(row.value) as T;
-  } catch {
+    if (!key) return null;
+    await ensureReady();
+    const db = await getDb();
+
+    const result = await db.getFirstAsync<{ value: string }>('SELECT value FROM kv_store WHERE key = ?', key);
+    
+    if (!result?.value) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(result.value) as T;
+    } catch {
+      return null;
+    }
+  } catch (err) {
+    console.error('[LocalDB] Erro ao obter valor:', err);
     return null;
   }
 }
 
 export async function removeDbValue(key: string) {
-  await ensureReady();
-  const db = await getDb();
-  await db.runAsync('DELETE FROM kv_store WHERE key = ?', key);
+  try {
+    if (!key) return;
+    await ensureReady();
+    const db = await getDb();
+    await db.runAsync('DELETE FROM kv_store WHERE key = ?', key);
+  } catch (err) {
+    console.error('[LocalDB] Erro ao remover valor:', err);
+  }
 }
 
 export async function pruneDbValuesByPrefixOlderThan(prefix: string, maxAgeMs: number) {
@@ -73,22 +91,26 @@ export async function pruneDbValuesByPrefixOlderThan(prefix: string, maxAgeMs: n
     return 0;
   }
 
-  await ensureReady();
-  const db = await getDb();
-  const cutoffIso = new Date(Date.now() - maxAgeMs).toISOString();
-  const likePattern = `${prefix}%`;
+  try {
+    await ensureReady();
+    const db = await getDb();
+    const cutoffIso = new Date(Date.now() - maxAgeMs).toISOString();
+    const likePattern = `${prefix}%`;
 
-  const countRow = await db.getFirstAsync<{ total: number }>(
-    'SELECT COUNT(1) as total FROM kv_store WHERE key LIKE ? AND updatedAt < ?',
-    likePattern,
-    cutoffIso
-  );
+    // Count rows
+    const countRow = await db.getFirstAsync<{ total: number }>('SELECT COUNT(1) as total FROM kv_store WHERE key LIKE ? AND updatedAt < ?', likePattern, cutoffIso);
 
-  const total = Number(countRow?.total || 0);
-  if (!total) {
+    const total = Number(countRow?.total || 0);
+    if (!total) {
+      return 0;
+    }
+
+    // Delete rows
+    await db.runAsync('DELETE FROM kv_store WHERE key LIKE ? AND updatedAt < ?', likePattern, cutoffIso);
+    
+    return total;
+  } catch (err) {
+    console.error('[LocalDB] Erro ao limpar dados antigos:', err);
     return 0;
   }
-
-  await db.runAsync('DELETE FROM kv_store WHERE key LIKE ? AND updatedAt < ?', likePattern, cutoffIso);
-  return total;
 }

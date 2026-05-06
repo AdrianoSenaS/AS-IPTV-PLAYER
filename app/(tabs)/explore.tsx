@@ -1,4 +1,5 @@
 import { MaterialIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -24,10 +25,12 @@ import { StreamingTheme } from '@/constants/streaming-theme';
 import { FeatureGate } from '@/components/feature-gate';
 import { usePlanGate } from '@/hooks/use-plan-gate';
 import { useScreenBenchmark } from '@/hooks/use-screen-benchmark';
+import { loadAiSettings } from '@/services/ai-settings';
 import { queryCatalogCount, queryCatalogPage, sanitizeLabelText, StreamItem, toText } from '@/services/catalog-data';
 import { buildLiveUrl } from '@/services/stream-url';
 import {
   buildUserTasteProfile,
+  getCachedTasteProfileSnapshot,
   getRecommendationReasons,
   rankContentByTaste,
   scoreItemByTaste,
@@ -56,6 +59,23 @@ const EXPLORE_SERIES_LIMIT = 420;
 const EXPLORE_LIVE_LIMIT = 220;
 const EXPLORE_MOOD_PER_QUERY = 16;
 const EXPLORE_HIDDEN_GEMS_LIMIT = 6;
+const EXPLORE_PROFILE_SAMPLE_LIMIT = 280;
+const EXPLORE_PROFILE_TIMEOUT_MS = 1800;
+const EXPLORE_TMDB_TIMEOUT_MS = 2200;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function seededRandom(seed: number) {
@@ -83,7 +103,9 @@ export default function ExploreScreen() {
   useScreenBenchmark('explore');
 
   const [isLoading, setIsLoading] = useState(true);
-    const { hasFeature, loading: planLoading } = usePlanGate();
+  const { hasFeature, loading: planLoading } = usePlanGate();
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const hasRecommendationAlgorithm = aiEnabled && !planLoading && hasFeature('recommendation_algorithm');
   const [movies, setMovies] = useState<StreamItem[]>([]);
   const [series, setSeries] = useState<StreamItem[]>([]);
   const [live, setLive] = useState<StreamItem[]>([]);
@@ -101,7 +123,24 @@ export default function ExploreScreen() {
 
   const spinAnim = useRef(new Animated.Value(0)).current;
 
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      void loadAiSettings().then((settings) => {
+        if (!mounted) return;
+        setAiEnabled(settings.enabled);
+      });
+      return () => {
+        mounted = false;
+      };
+    }, [])
+  );
+
   useEffect(() => {
+    void loadAiSettings().then((settings) => {
+      setAiEnabled(settings.enabled);
+    });
+
     const bootstrap = async () => {
       const version = ++bootstrapVersionRef.current;
       const [vodTotal, seriesTotal, liveTotal] = await Promise.all([
@@ -139,25 +178,49 @@ export default function ExploreScreen() {
       setMovies(vod);
       setSeries(seriesData);
       setLive(liveStreams);
+      if (hasRecommendationAlgorithm) {
+        const cachedProfile = getCachedTasteProfileSnapshot();
+        if (cachedProfile) {
+          setTasteProfile(cachedProfile);
+        }
+      }
       setIsLoading(false);
 
       InteractionManager.runAfterInteractions(() => {
         void (async () => {
+          const sampledVod = vod.slice(0, EXPLORE_PROFILE_SAMPLE_LIMIT);
+          const sampledSeries = seriesData.slice(0, EXPLORE_PROFILE_SAMPLE_LIMIT);
+          const sampledLive = liveStreams.slice(0, Math.floor(EXPLORE_PROFILE_SAMPLE_LIMIT / 2));
+
           const [profile, movieMap, seriesMap] = await Promise.all([
-            buildUserTasteProfile({
-              catalog: { vod, series: seriesData, liveStreams },
-            }),
-            buildTmdbMetadataForCatalog(
-              vod,
-              'movie',
-              (item) => toText(item.stream_id),
-              (item) => sanitizeLabelText(item.title || item.name, '')
+            hasRecommendationAlgorithm
+              ? withTimeout(
+                  buildUserTasteProfile({
+                    catalog: { vod: sampledVod, series: sampledSeries, liveStreams: sampledLive },
+                  }),
+                  EXPLORE_PROFILE_TIMEOUT_MS,
+                  null
+                )
+              : Promise.resolve(null),
+            withTimeout(
+              buildTmdbMetadataForCatalog(
+                vod,
+                'movie',
+                (item) => toText(item.stream_id),
+                (item) => sanitizeLabelText(item.title || item.name, '')
+              ),
+              EXPLORE_TMDB_TIMEOUT_MS,
+              {} as Record<string, TmdbMeta>
             ),
-            buildTmdbMetadataForCatalog(
-              seriesData,
-              'tv',
-              (item) => toText(item.series_id),
-              (item) => sanitizeLabelText(item.title || item.name, '')
+            withTimeout(
+              buildTmdbMetadataForCatalog(
+                seriesData,
+                'tv',
+                (item) => toText(item.series_id),
+                (item) => sanitizeLabelText(item.title || item.name, '')
+              ),
+              EXPLORE_TMDB_TIMEOUT_MS,
+              {} as Record<string, TmdbMeta>
             ),
           ]);
 
@@ -173,7 +236,7 @@ export default function ExploreScreen() {
     };
 
     void bootstrap();
-  }, [shuffleKey]);
+  }, [shuffleKey, hasRecommendationAlgorithm]);
 
   useEffect(() => {
     let canceled = false;
@@ -280,7 +343,7 @@ export default function ExploreScreen() {
       ...series.map((s) => ({ item: s, type: 'series' as const })),
     ];
     const pool = shuffled(mix);
-    if (!tasteProfile) return pool.slice(0, 20);
+    if (!hasRecommendationAlgorithm || !tasteProfile) return pool.slice(0, 20);
     return [...pool]
       .sort(
         (a, b) =>
@@ -288,14 +351,14 @@ export default function ExploreScreen() {
           scoreItemByTaste(a.item, a.type, tasteProfile)
       )
       .slice(0, 20);
-  }, [movies, series, shuffleKey, tasteProfile]);
+  }, [movies, series, shuffleKey, tasteProfile, hasRecommendationAlgorithm]);
 
   // Canais ao vivo aleatórios
   const randomLive = useMemo(() => {
     const pool = shuffled(live);
-    if (!tasteProfile) return pool.slice(0, 8);
+    if (!hasRecommendationAlgorithm || !tasteProfile) return pool.slice(0, 8);
     return rankContentByTaste(pool, 'live', tasteProfile, 8);
-  }, [live, shuffleKey, tasteProfile]);
+  }, [live, shuffleKey, tasteProfile, hasRecommendationAlgorithm]);
 
   useEffect(() => {
     let canceled = false;
@@ -351,7 +414,7 @@ export default function ExploreScreen() {
         ...Array.from(seriesById.values()).map((item) => ({ item, type: 'series' as const })),
       ]);
 
-      const ranked = !tasteProfile
+      const ranked = !hasRecommendationAlgorithm || !tasteProfile
         ? pool.slice(0, 20)
         : [...pool]
             .sort(
@@ -371,7 +434,7 @@ export default function ExploreScreen() {
     return () => {
       canceled = true;
     };
-  }, [activeMood, tasteProfile, shuffleKey]);
+  }, [activeMood, tasteProfile, shuffleKey, hasRecommendationAlgorithm]);
 
   // ─── navegação ──────────────────────────────────────────────────────────
   const openMovie = useCallback(

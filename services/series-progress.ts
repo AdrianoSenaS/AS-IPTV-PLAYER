@@ -1,6 +1,22 @@
 import { getDbValue, setDbValue } from '@/services/local-db';
+import { scheduleAutoCloudBackup } from '@/services/backup-background';
+import { loadProfileScopedValue, saveProfileScopedValue } from '@/services/profile-scoped-storage';
 
 const KEY = 'seriesProgressMap';
+const IMMEDIATE_SYNC_INTERVAL_MS = 90_000;
+let lastImmediateSyncAt = 0;
+
+function triggerImmediateProfileSyncIfNeeded() {
+  const now = Date.now();
+  if (now - lastImmediateSyncAt < IMMEDIATE_SYNC_INTERVAL_MS) {
+    return;
+  }
+
+  lastImmediateSyncAt = now;
+  import('@/services/cloud-sync')
+    .then(({ triggerImmediateSync }) => triggerImmediateSync())
+    .catch(() => null);
+}
 
 type EpisodeState = {
   progress: number;
@@ -22,7 +38,7 @@ const makeEpisodeKey = (season: number, episode: number) => `${season}:${episode
 
 export async function loadSeriesProgressMap(): Promise<SeriesProgressMap> {
   try {
-    const parsed = await getDbValue<SeriesProgressMap>(KEY);
+    const parsed = await loadProfileScopedValue<SeriesProgressMap>(KEY, {});
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
@@ -30,7 +46,7 @@ export async function loadSeriesProgressMap(): Promise<SeriesProgressMap> {
 }
 
 async function saveSeriesProgressMap(map: SeriesProgressMap) {
-  await setDbValue(KEY, map);
+  await saveProfileScopedValue(KEY, map);
 }
 
 export async function updateEpisodeProgress(
@@ -59,6 +75,8 @@ export async function updateEpisodeProgress(
 
   map[seriesId] = currentSeries;
   await saveSeriesProgressMap(map);
+  scheduleAutoCloudBackup();
+  triggerImmediateProfileSyncIfNeeded();
   return map;
 }
 

@@ -42,10 +42,30 @@ type CatalogQueryOptions = {
 const CATALOG_DB_KEY = 'catalog.snapshot.v3';
 const CATALOG_LAST_UPDATE_KEY = 'catalog.lastUpdate.v1';
 const CATALOG_READY_KEY = 'catalog.ready.v1';
+const RT_BLOCKED_CONTENT_CACHE_KEY = 'realtimeServer.blockedContent.v1';
+const BLOCKED_CACHE_TTL_MS = 30000;
 
 let catalogCache: CatalogSnapshot | null = null;
 let catalogHashCache = '';
 let catalogInitialized = false;
+let blockedSetCache = new Set<string>();
+let blockedSetCacheAt = 0;
+
+async function getBlockedContentSet(): Promise<Set<string>> {
+  const now = Date.now();
+  if (now - blockedSetCacheAt <= BLOCKED_CACHE_TTL_MS) {
+    return blockedSetCache;
+  }
+
+  const blockedIds = await getDbValue<string[]>(RT_BLOCKED_CONTENT_CACHE_KEY);
+  blockedSetCache = new Set(
+    Array.isArray(blockedIds)
+      ? blockedIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : []
+  );
+  blockedSetCacheAt = now;
+  return blockedSetCache;
+}
 
 function ensureArray(value: unknown): StreamItem[] {
   return Array.isArray(value) ? (value as StreamItem[]) : [];
@@ -177,45 +197,50 @@ function getSearchText(item: StreamItem) {
     .toLowerCase();
 }
 
+// Otimização: processamento chunked para evitar OOM
 async function replaceItemsInTable(tableName: 'catalog_items' | 'catalog_items_staging', kind: CatalogKind, items: StreamItem[]) {
   const db = await getLocalDb();
   const now = new Date().toISOString();
-
-  // Pré-computar linhas válidas para batch insert
   type Row = [string, string, string, string, string, number, string, string];
-  const rows: Row[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const itemId = getItemIdByKind(kind, item);
-    if (!itemId) continue;
-    rows.push([
-      kind,
-      itemId,
-      toText(item.category_id),
-      getTitle(item),
-      getSearchText(item),
-      Number(item.num ?? i),
-      JSON.stringify(item),
-      now,
-    ]);
-  }
-
-  // SQLite SQLITE_MAX_VARIABLE_NUMBER = 999; 8 colunas × 120 linhas = 960 (seguro)
   const BATCH = 120;
+  const CHUNK = 500; // processa 500 itens por vez para liberar memória
 
   await db.execAsync('BEGIN IMMEDIATE TRANSACTION;');
   try {
-    await db.runAsync(`DELETE FROM ${tableName} WHERE kind = ?`, kind);
+    await db.runAsync(`DELETE FROM ${tableName} WHERE kind = ?`, [kind]);
 
-    for (let start = 0; start < rows.length; start += BATCH) {
-      const chunk = rows.slice(start, start + BATCH);
-      const placeholders = chunk.map(() => '(?,?,?,?,?,?,?,?)').join(',');
-      await db.runAsync(
-        `INSERT OR REPLACE INTO ${tableName}
-          (kind,item_id,category_id,title,search_text,sort_num,payload,updated_at)
-         VALUES ${placeholders}`,
-        ...chunk.flat()
-      );
+    for (let chunkStart = 0; chunkStart < items.length; chunkStart += CHUNK) {
+      const chunkItems = items.slice(chunkStart, chunkStart + CHUNK);
+      const rows: Row[] = [];
+      for (let i = 0; i < chunkItems.length; i++) {
+        const item = chunkItems[i];
+        const itemId = getItemIdByKind(kind, item);
+        if (!itemId) continue;
+        rows.push([
+          kind,
+          itemId,
+          toText(item.category_id),
+          getTitle(item),
+          getSearchText(item),
+          Number(item.num ?? (chunkStart + i)),
+          JSON.stringify(item),
+          now,
+        ]);
+      }
+      for (let start = 0; start < rows.length; start += BATCH) {
+        const batch = rows.slice(start, start + BATCH);
+        const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?)').join(',');
+        await db.runAsync(
+          `INSERT OR REPLACE INTO ${tableName}
+            (kind,item_id,category_id,title,search_text,sort_num,payload,updated_at)
+           VALUES ${placeholders}`,
+          batch.flat()
+        );
+      }
+      // Libera memória do chunk
+      rows.length = 0;
+      // @ts-ignore
+      globalThis.gc?.();
     }
 
     await db.execAsync('COMMIT;');
@@ -229,6 +254,7 @@ async function replaceItems(kind: CatalogKind, items: StreamItem[]) {
   await replaceItemsInTable('catalog_items', kind, items);
 }
 
+// Otimização: processamento chunked para evitar OOM
 async function replaceCategoriesInTable(
   tableName: 'catalog_categories' | 'catalog_categories_staging',
   kind: CatalogKind,
@@ -236,38 +262,42 @@ async function replaceCategoriesInTable(
 ) {
   const db = await getLocalDb();
   const now = new Date().toISOString();
-
-  // Pré-computar linhas válidas para batch insert
   type Row = [string, string, string, string, string];
-  const rows: Row[] = [];
-  for (const category of categories) {
-    const categoryId = toText(category.category_id);
-    if (!categoryId) continue;
-    rows.push([
-      kind,
-      categoryId,
-      sanitizeLabelText(category.category_name, 'Categoria'),
-      JSON.stringify(category),
-      now,
-    ]);
-  }
-
-  // SQLite SQLITE_MAX_VARIABLE_NUMBER = 999; 5 colunas × 190 linhas = 950 (seguro)
   const BATCH = 190;
+  const CHUNK = 800; // categorias são menores, pode ser maior
 
   await db.execAsync('BEGIN IMMEDIATE TRANSACTION;');
   try {
-    await db.runAsync(`DELETE FROM ${tableName} WHERE kind = ?`, kind);
+    await db.runAsync(`DELETE FROM ${tableName} WHERE kind = ?`, [kind]);
 
-    for (let start = 0; start < rows.length; start += BATCH) {
-      const chunk = rows.slice(start, start + BATCH);
-      const placeholders = chunk.map(() => '(?,?,?,?,?)').join(',');
-      await db.runAsync(
-        `INSERT OR REPLACE INTO ${tableName}
-          (kind,category_id,category_name,payload,updated_at)
-         VALUES ${placeholders}`,
-        ...chunk.flat()
-      );
+    for (let chunkStart = 0; chunkStart < categories.length; chunkStart += CHUNK) {
+      const chunkCats = categories.slice(chunkStart, chunkStart + CHUNK);
+      const rows: Row[] = [];
+      for (let i = 0; i < chunkCats.length; i++) {
+        const category = chunkCats[i];
+        const categoryId = toText(category.category_id);
+        if (!categoryId) continue;
+        rows.push([
+          kind,
+          categoryId,
+          sanitizeLabelText(category.category_name, 'Categoria'),
+          JSON.stringify(category),
+          now,
+        ]);
+      }
+      for (let start = 0; start < rows.length; start += BATCH) {
+        const batch = rows.slice(start, start + BATCH);
+        const placeholders = batch.map(() => '(?,?,?,?,?)').join(',');
+        await db.runAsync(
+          `INSERT OR REPLACE INTO ${tableName}
+            (kind,category_id,category_name,payload,updated_at)
+           VALUES ${placeholders}`,
+          batch.flat()
+        );
+      }
+      rows.length = 0;
+      // @ts-ignore
+      globalThis.gc?.();
     }
 
     await db.execAsync('COMMIT;');
@@ -399,13 +429,14 @@ export async function hasLocalCatalogDataQuick(): Promise<boolean> {
   );
 }
 
+// Otimização: snapshot processado em lotes menores para evitar OOM
 export async function saveCatalogSnapshot(snapshot: CatalogSnapshot, _writeFiles = false) {
   const safe = toSnapshot(snapshot);
   const nextHash = buildFastHash(safe);
 
   await ensureCatalogTables();
 
-  // Executa em sequência para evitar lock de transação concorrente no SQLite.
+  // Processa cada tipo em lotes menores
   await replaceItems('vod', safe.vod);
   await replaceItems('series', safe.series);
   await replaceItems('live', safe.liveStreams);
@@ -437,8 +468,10 @@ async function readItems(kind: CatalogKind): Promise<StreamItem[]> {
     `SELECT payload FROM catalog_items
       WHERE kind = ?
       ORDER BY sort_num ASC, item_id ASC`,
-    kind
+    [kind]
   );
+
+  const blockedSet = await getBlockedContentSet();
 
   return rows
     .map((row) => {
@@ -448,7 +481,12 @@ async function readItems(kind: CatalogKind): Promise<StreamItem[]> {
         return null;
       }
     })
-    .filter(Boolean) as StreamItem[];
+    .filter(Boolean)
+    .filter((item) => {
+      const itemId = kind === 'series' ? toText(item?.series_id) : toText(item?.stream_id);
+      if (!itemId) return true;
+      return !blockedSet.has(itemId);
+    }) as StreamItem[];
 }
 
 async function readCategories(kind: CatalogKind): Promise<StreamItem[]> {
@@ -458,7 +496,7 @@ async function readCategories(kind: CatalogKind): Promise<StreamItem[]> {
     `SELECT payload FROM catalog_categories
       WHERE kind = ?
       ORDER BY category_name COLLATE NOCASE ASC`,
-    kind
+    [kind]
   );
 
   return rows
@@ -532,7 +570,14 @@ export async function queryCatalogPage({
       WHERE ${where.join(' AND ')}
       ORDER BY sort_num ASC, item_id ASC
       LIMIT ? OFFSET ?`,
-    ...args
+    args
+  );
+
+  const blockedIds = await getDbValue<string[]>(RT_BLOCKED_CONTENT_CACHE_KEY);
+  const blockedSet = new Set(
+    Array.isArray(blockedIds)
+      ? blockedIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : []
   );
 
   return rows
@@ -543,7 +588,12 @@ export async function queryCatalogPage({
         return null;
       }
     })
-    .filter(Boolean) as StreamItem[];
+    .filter(Boolean)
+    .filter((item) => {
+      const itemId = kind === 'series' ? toText(item?.series_id) : toText(item?.stream_id);
+      if (!itemId) return true;
+      return !blockedSet.has(itemId);
+    }) as StreamItem[];
 }
 
 export async function queryCatalogCount({
@@ -570,7 +620,7 @@ export async function queryCatalogCount({
 
   const row = await db.getFirstAsync<{ total: number }>(
     `SELECT COUNT(1) as total FROM catalog_items WHERE ${where.join(' AND ')}`,
-    ...args
+    args
   );
 
   return Number(row?.total || 0);
@@ -634,6 +684,13 @@ export async function queryCatalogItemsByIds(
     return {};
   }
 
+  const blockedIds = await getDbValue<string[]>(RT_BLOCKED_CONTENT_CACHE_KEY);
+  const blockedSet = new Set(
+    Array.isArray(blockedIds)
+      ? blockedIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : []
+  );
+
   const byId: Record<string, StreamItem> = {};
   const CHUNK_SIZE = 300;
 
@@ -643,12 +700,14 @@ export async function queryCatalogItemsByIds(
     const rows = await db.getAllAsync<{ item_id: string; payload: string }>(
       `SELECT item_id, payload FROM catalog_items
         WHERE kind = ? AND item_id IN (${placeholders})`,
-      kind,
-      ...chunk
+      [kind, ...chunk]
     );
 
     for (const row of rows) {
       try {
+        if (blockedSet.has(String(row.item_id || '').trim())) {
+          continue;
+        }
         byId[row.item_id] = JSON.parse(row.payload) as StreamItem;
       } catch {
         // Ignora payload invalido para manter resiliencia.

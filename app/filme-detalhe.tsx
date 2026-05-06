@@ -1,6 +1,7 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { getDbValue } from '@/services/local-db';
-import { Image } from 'expo-image';
+import { Image } from 'expo-image';
+
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -28,11 +29,13 @@ import {
   loadCachedContentDetails,
   saveCachedContentDetails,
 } from '@/services/content-details-cache';
-import { downloadMovie } from '@/services/downloads';
+import { downloadMovie, isItemDownloaded, deleteDownloadedItem, getDownloadedItemsByContentId } from '@/services/downloads';
+import { isItemInAnyList, getItemsInAllLists } from '@/services/user-lists';
 import { getDemoVodInfo, isDemoModeEnabled } from '@/services/demo-mode';
 import { getMovieProgress, loadMovieProgressMap, MovieProgressMap } from '@/services/movie-progress';
 import { buildMovieUrl } from '@/services/stream-url';
 import { loadCatalogData, sanitizeLabelText, StreamItem, toText } from '@/services/catalog-data';
+import { parseDurationTextToMs } from '@/services/media-duration';
 import { hasFeature as subscriptionHasFeature } from '@/services/subscription';
 import {
   fetchTmdbContentDetailsByTitle,
@@ -41,6 +44,8 @@ import {
   TmdbContentDetails,
   TmdbPersonBio,
 } from '@/services/tmdb';
+import { isContentBlocked } from '@/services/realtime-presence';
+import { setGlobalCastState } from '@/services/global-cast-session';
 
 type VodInfoPayload = {
   info?: {
@@ -79,12 +84,13 @@ async function getVodInfo(vodId: string): Promise<VodInfoPayload> {
 
 export default function FilmeDetalheScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ streamId?: string }>();
+  const params = useLocalSearchParams<{ streamId?: string; startPositionMs?: string }>();
 
   const { hasFeature, loading: planLoading } = usePlanGate();
   const tmdbLocked = !planLoading && !hasFeature('tmdb_details');
   const listLocked = !planLoading && !hasFeature('lists');
   const downloadLocked = !planLoading && !hasFeature('downloads');
+  const castLocked = !planLoading && !hasFeature('cast_mirror');
 
   const [isLoading, setIsLoading] = useState(true);
   const [movie, setMovie] = useState<StreamItem | null>(null);
@@ -93,12 +99,17 @@ export default function FilmeDetalheScreen() {
   const [progressMap, setProgressMap] = useState<MovieProgressMap>({});
   const [showAddToList, setShowAddToList] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [blockedByParental, setBlockedByParental] = useState(false);
   const [tmdbDetails, setTmdbDetails] = useState<TmdbContentDetails | null>(null);
   const [selectedActor, setSelectedActor] = useState<TmdbCastMember | null>(null);
   const [selectedActorBio, setSelectedActorBio] = useState<TmdbPersonBio | null>(null);
   const [isLoadingBio, setIsLoadingBio] = useState(false);
+  const [isDownloaded, setIsDownloaded] = useState(false);
+  const [isInList, setIsInList] = useState(false);
+  const [isCastLoading, setIsCastLoading] = useState(false);
 
   const streamId = String(params.streamId || '');
+  const incomingStartPositionMs = Math.max(0, Number(params.startPositionMs || 0) || 0);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -113,17 +124,22 @@ export default function FilmeDetalheScreen() {
         loadMovieProgressMap(),
         loadCachedContentDetails('movie', streamId),
       ]);
+      const blocked = await isContentBlocked(streamId).catch(() => false);
       const foundMovie = vod.find((item) => String(item.stream_id) === streamId) || null;
 
       setMovie(foundMovie);
       setAllMovies(vod);
       setVodInfo(info || {});
       setProgressMap(map);
+      setBlockedByParental(blocked);
       if (cachedDetails?.tmdbDetails) {
         setTmdbDetails(cachedDetails.tmdbDetails);
       }
 
       setIsLoading(false);
+      if (blocked) {
+        return;
+      }
 
       const titleForTmdb = sanitizeLabelText(
         info?.info?.name || foundMovie?.title || foundMovie?.name,
@@ -180,7 +196,28 @@ export default function FilmeDetalheScreen() {
     }, [])
   );
 
+  useFocusEffect(
+    React.useCallback(() => {
+      let mounted = true;
+      const checkStates = async () => {
+        if (!streamId) return;
+        const downloaded = await isItemDownloaded(streamId, 'movie');
+        const inList = await isItemInAnyList(streamId, 'movie');
+        if (mounted) {
+          setIsDownloaded(downloaded);
+          setIsInList(inList);
+        }
+      };
+
+      checkStates();
+      return () => {
+        mounted = false;
+      };
+    }, [streamId])
+  );
+
   const movieProgress = useMemo(() => getMovieProgress(progressMap, streamId), [progressMap, streamId]);
+  const effectiveStartPositionMs = Math.max(movieProgress?.positionMs || 0, incomingStartPositionMs);
 
   const relatedMovies = useMemo(() => {
     if (!movie || !allMovies.length) return [];
@@ -215,6 +252,10 @@ export default function FilmeDetalheScreen() {
 
   const openPlayer = async () => {
     if (!movie) return;
+    if (blockedByParental) {
+      Alert.alert('Conteúdo bloqueado', 'Este conteúdo está bloqueado no controle parental. Desbloqueie no monitor parental para assistir novamente.');
+      return;
+    }
 
     const url = await buildMovieUrl(movie);
     if (!url) return;
@@ -226,9 +267,64 @@ export default function FilmeDetalheScreen() {
         contentId: streamId,
         title: sanitizeLabelText(vodInfo.info?.name || movie.title || movie.name, 'Filme'),
         url,
-        startPositionMs: String(movieProgress?.positionMs || 0),
+        durationMs: String(parseDurationTextToMs(vodInfo.info?.duration || movie.duration)),
+        startPositionMs: String(effectiveStartPositionMs),
       },
     });
+  };
+
+  const requestCastDirect = async () => {
+    if (!movie) return;
+    if (castLocked) {
+      router.push({ pathname: '/assinar', params: { feature: 'cast_mirror' } });
+      return;
+    }
+    if (blockedByParental) {
+      Alert.alert('Conteúdo bloqueado', 'Este conteúdo está bloqueado no controle parental. Desbloqueie no monitor parental para assistir novamente.');
+      return;
+    }
+
+    setIsCastLoading(true);
+
+    try {
+      const url = await buildMovieUrl(movie);
+      if (!url) {
+        Alert.alert('Erro', 'Não foi possível obter a URL do vídeo.');
+        setIsCastLoading(false);
+        return;
+      }
+
+      const title = sanitizeLabelText(vodInfo.info?.name || movie.title || movie.name, 'Filme');
+      setGlobalCastState({
+        isActive: true,
+        url,
+        title,
+        subtitle: '',
+        mode: 'movie',
+        contentId: streamId,
+        startPositionMs: effectiveStartPositionMs,
+      });
+
+      router.navigate({
+        pathname: '/player',
+        params: {
+          mode: 'movie',
+          contentId: streamId,
+          title,
+          url,
+          durationMs: String(parseDurationTextToMs(vodInfo.info?.duration || movie.duration)),
+          startPositionMs: String(effectiveStartPositionMs),
+          castPrep: '1',
+        },
+      });
+
+      setIsCastLoading(false);
+    } catch (error) {
+      console.error('[FilmeDetalhe] Erro ao iniciar Cast:', error);
+      Alert.alert('Erro', 'Falha ao iniciar transmissão');
+      setGlobalCastState({ isActive: false, url: '', title: '' });
+      setIsCastLoading(false);
+    }
   };
 
   const openMovieDetails = (nextMovie: StreamItem) => {
@@ -237,7 +333,7 @@ export default function FilmeDetalheScreen() {
     router.push(`/filme-detalhe?streamId=${encodeURIComponent(nextId)}` as any);
   };
 
-  const downloadCurrentMovie = async () => {
+  const toggleDownloadMovie = async () => {
     if (!movie) return;
 
     if (downloadLocked) {
@@ -247,9 +343,22 @@ export default function FilmeDetalheScreen() {
 
     try {
       setIsDownloading(true);
+
+      // Se já foi baixado, remove
+      if (isDownloaded) {
+        const items = await getDownloadedItemsByContentId(streamId, 'movie');
+        for (const item of items) {
+          await deleteDownloadedItem(item.id);
+        }
+        setIsDownloaded(false);
+        Alert.alert('Download removido', 'O filme foi removido da lista de downloads.');
+        return;
+      }
+
+      // Caso contrário, baixa
       const url = await buildMovieUrl(movie);
       if (!url) {
-        Alert.alert('Download indisponivel', 'Nao foi possivel resolver a URL do filme.');
+        Alert.alert('Download indisponível', 'Não foi possível resolver a URL do filme.');
         return;
       }
 
@@ -259,9 +368,10 @@ export default function FilmeDetalheScreen() {
         image: cover,
         sourceUrl: url,
       });
-      Alert.alert('Download concluido', 'O filme foi salvo na tela de downloads.');
+      setIsDownloaded(true);
+      Alert.alert('Download concluído', 'O filme foi salvo na tela de downloads.');
     } catch (error: any) {
-      Alert.alert('Erro ao baixar', String(error?.message || error || 'Nao foi possivel baixar o filme.'));
+      Alert.alert('Erro ao baixar', String(error?.message || error || 'Não foi possível baixar o filme.'));
     } finally {
       setIsDownloading(false);
     }
@@ -271,12 +381,12 @@ export default function FilmeDetalheScreen() {
   const cover = toText(vodInfo.info?.movie_image || movie?.stream_icon || movie?.cover);
   const description = toText(
     tmdbDetails?.overview || vodInfo.info?.plot || movie?.plot,
-    'Descricao indisponivel para este conteudo no provedor.'
+    'Descrição indisponível para este conteúdo no provedor.'
   );
   const duration =
     tmdbDetails?.runtimeMinutes
       ? `${tmdbDetails.runtimeMinutes} min`
-      : toText(vodInfo.info?.duration || movie?.duration, 'Duracao indisponivel');
+      : toText(vodInfo.info?.duration || movie?.duration, 'Duração indisponível');
   const rating =
     typeof tmdbDetails?.rating === 'number'
       ? String(tmdbDetails.rating)
@@ -284,7 +394,7 @@ export default function FilmeDetalheScreen() {
   const genre =
     tmdbDetails?.genres?.length
       ? tmdbDetails.genres.join(', ')
-      : toText(vodInfo.info?.genre || movie?.genre, 'Genero nao informado');
+      : toText(vodInfo.info?.genre || movie?.genre, 'Gênero não informado');
   const castText = tmdbDetails?.cast?.length
     ? tmdbDetails.cast.slice(0, 5).map((person) => person.name).join(', ')
     : toText(vodInfo.info?.cast, '-');
@@ -299,6 +409,23 @@ export default function FilmeDetalheScreen() {
       setIsLoadingBio(false);
     }
   };
+
+  if (blockedByParental) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <AppBackdrop blurIntensity={28} />
+        <View style={styles.emptyStateWrap}>
+          <MaterialIcons name="block" size={42} color="#EF4444" />
+          <Text style={styles.emptyStateTitle}>Conteúdo bloqueado</Text>
+          <Text style={styles.emptyStateDesc}>Este item foi bloqueado pelos responsáveis e está oculto até ser liberado no controle parental.</Text>
+          <TouchableOpacity style={styles.backPrimaryBtn} onPress={() => router.back()}>
+            <Text style={styles.backPrimaryBtnText}>Voltar</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -324,7 +451,7 @@ export default function FilmeDetalheScreen() {
               <MaterialIcons name="star" size={16} color={StreamingTheme.colors.warning} />
               <Text style={styles.ratingText}>{rating}</Text>
             </View>
-            <Text style={styles.duration}>Duracao: {duration}</Text>
+            <Text style={styles.duration}>Duração: {duration}</Text>
           </View>
         </View>
 
@@ -334,9 +461,9 @@ export default function FilmeDetalheScreen() {
 
           <View style={styles.infoGrid}>
             <Info label="Ano" value={toText(vodInfo.info?.year || (movie as any)?.year, '-')} />
-            <Info label="Direcao" value={toText(tmdbDetails?.director || vodInfo.info?.director, '-')} />
+            <Info label="Direção" value={toText(tmdbDetails?.director || vodInfo.info?.director, '-')} />
             <Info label="Elenco" value={castText} />
-            <Info label="Lancamento" value={toText(vodInfo.info?.releasedate, '-')} />
+            <Info label="Lançamento" value={toText(vodInfo.info?.releasedate, '-')} />
           </View>
         </View>
 
@@ -344,8 +471,8 @@ export default function FilmeDetalheScreen() {
           <Text style={styles.sectionTitle}>Continuar assistindo</Text>
           <Text style={styles.progressText}>
             {movieProgress
-              ? `Voce parou em ${movieProgress.progressPercent}% (${Math.floor(movieProgress.positionMs / 60000)} min).`
-              : 'Voce ainda nao iniciou este filme.'}
+              ? `Você parou em ${movieProgress.progressPercent}% (${Math.floor(movieProgress.positionMs / 60000)} min).`
+              : 'Você ainda não iniciou este filme.'}
           </Text>
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${movieProgress?.progressPercent || 0}%` }]} />
@@ -355,6 +482,20 @@ export default function FilmeDetalheScreen() {
             <MaterialIcons name="play-arrow" size={22} color={StreamingTheme.colors.textPrimary} />
             <Text style={styles.playText}>{movieProgress ? 'Continuar de onde parou' : 'Assistir agora'}</Text>
           </TouchableOpacity>
+
+          {!castLocked && (
+            <TouchableOpacity
+              style={[styles.castBtn, isCastLoading && { opacity: 0.6 }]}
+              onPress={requestCastDirect}
+              disabled={isCastLoading}>
+              {isCastLoading ? (
+                <ActivityIndicator size="small" color={StreamingTheme.colors.textPrimary} />
+              ) : (
+                <MaterialIcons name="cast" size={22} color={StreamingTheme.colors.textPrimary} />
+              )}
+              <Text style={styles.castText}>{isCastLoading ? 'Conectando...' : 'Espelhar pra TV'}</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={[styles.addListBtn, listLocked && styles.ctaLockedBtn]}
@@ -375,15 +516,23 @@ export default function FilmeDetalheScreen() {
 
           <TouchableOpacity
             style={[styles.downloadBtn, downloadLocked && styles.ctaLockedBtn]}
-            onPress={downloadCurrentMovie}
+            onPress={toggleDownloadMovie}
             disabled={isDownloading && !downloadLocked}>
             <MaterialIcons
-              name={downloadLocked ? 'workspace-premium' : 'download'}
+              name={downloadLocked ? 'workspace-premium' : isDownloaded ? 'delete-outline' : 'download'}
               size={20}
               color={StreamingTheme.colors.textPrimary}
             />
             <Text style={styles.downloadText}>
-              {downloadLocked ? 'Download Premium' : isDownloading ? 'Baixando...' : 'Baixar filme'}
+              {downloadLocked
+                ? 'Download Premium'
+                : isDownloading
+                ? isDownloaded
+                  ? 'Removendo...'
+                  : 'Baixando...'
+                : isDownloaded
+                ? 'Remover download'
+                : 'Baixar filme'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -437,7 +586,7 @@ export default function FilmeDetalheScreen() {
                       </View>
                     )}
                     <Text style={styles.relatedTitle} numberOfLines={2}>
-                      {sanitizeLabelText(item.title || item.name, 'Sem titulo')}
+                      {sanitizeLabelText(item.title || item.name, 'Sem título')}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -546,6 +695,11 @@ function getProgressBadgeTone(progressPercent: number) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: StreamingTheme.colors.background },
+  emptyStateWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, gap: 10 },
+  emptyStateTitle: { color: StreamingTheme.colors.textPrimary, fontSize: 20, fontWeight: '800' },
+  emptyStateDesc: { color: StreamingTheme.colors.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 19 },
+  backPrimaryBtn: { marginTop: 8, minHeight: 38, borderRadius: 10, backgroundColor: StreamingTheme.colors.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  backPrimaryBtnText: { color: StreamingTheme.colors.textPrimary, fontWeight: '800', fontSize: 13 },
   content: { padding: 16, paddingBottom: 120 },
   headerRow: {
     flexDirection: 'row',
@@ -733,6 +887,23 @@ const styles = StyleSheet.create({
   playText: {
     color: StreamingTheme.colors.textPrimary,
     fontSize: 14,
+    fontWeight: '800',
+  },
+  castBtn: {
+    marginTop: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: StreamingTheme.colors.border,
+    backgroundColor: StreamingTheme.colors.surfaceAlt,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  castText: {
+    color: StreamingTheme.colors.textPrimary,
+    fontSize: 13,
     fontWeight: '800',
   },
   addListBtn: {

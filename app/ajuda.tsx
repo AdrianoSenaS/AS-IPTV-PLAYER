@@ -2,7 +2,8 @@ import {
   Feather,
   MaterialCommunityIcons,
   MaterialIcons,
-} from '@expo/vector-icons';
+} from '@expo/vector-icons';
+
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -30,18 +31,18 @@ const faqData = [
   },
   {
     id: '2',
-    question: 'Minha lista nao carregou. O que fazer?',
-    answer: 'Abra a tela de loading novamente para sincronizar e valide usuario e senha.',
+    question: 'Minha lista não carregou. O que fazer?',
+    answer: 'Abra a tela de loading novamente para sincronizar e valide usuário e senha.',
   },
   {
     id: '3',
     question: 'Posso usar em mais de um dispositivo?',
-    answer: 'Depende do plano do provedor. Consulte a quantidade de conexoes simultaneas.',
+    answer: 'Depende do plano do provedor. Consulte a quantidade de conexões simultâneas.',
   },
   {
     id: '4',
-    question: 'Nao encontro um canal especifico',
-    answer: 'Use busca por categoria e atualize os catalogos na tela de carregamento.',
+    question: 'Não encontro um canal específico',
+    answer: 'Use busca por categoria e atualize os catálogos na tela de carregamento.',
   },
 ];
 
@@ -78,7 +79,7 @@ export default function AjudaScreen() {
           ? `mailto:${value}`
           : `https://instagram.com/${value.replace('@', '')}`;
 
-    Linking.openURL(url).catch(() => Alert.alert('Erro', 'Nao foi possivel abrir o contato.'));
+    Linking.openURL(url).catch(() => Alert.alert('Erro', 'Não foi possível abrir o contato.'));
   };
 
   return (
@@ -103,7 +104,7 @@ export default function AjudaScreen() {
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Buscar duvida"
+            placeholder="Buscar dúvida"
             placeholderTextColor={StreamingTheme.colors.textMuted}
             style={styles.searchInput}
           />

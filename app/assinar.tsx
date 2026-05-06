@@ -20,10 +20,13 @@ import {
   Feature,
   FEATURE_LABELS,
   Plan,
+  getAvailablePlans,
+  getSubscriptionPageContent,
   PLANS,
   getActivePlanId,
   minPlanForFeature,
   PlanId,
+  SubscriptionPageContent,
 } from '@/services/subscription';
 
 const { width: W } = Dimensions.get('window');
@@ -35,33 +38,39 @@ const SUBSCRIPTION_URL = 'https://asiptv.com.br/assinar';
 type Params = { feature?: Feature; from?: string };
 
 // ─── Dados de marketing ───────────────────────────────────────────────────────
-const TRIGGERS = [
-  { icon: 'bolt' as const,           text: 'Use seu próprio conteúdo com desempenho e organização' },
-  { icon: 'hd' as const,             text: 'Recursos avançados de reprodução (incluindo 4K)' },
-  { icon: 'download' as const,       text: 'Baixe para assistir offline quando quiser' },
-  { icon: 'auto-awesome' as const,   text: 'Recomendações inteligentes com seu histórico' },
-  { icon: 'cast' as const,           text: 'Espelhamento e transmissão para TV' },
-  { icon: 'shield' as const,         text: 'Controle parental e monitoramento em tempo real' },
-  { icon: 'picture-in-picture-alt' as const, text: 'PiP para continuar assistindo em miniatura' },
-  { icon: 'group' as const,          text: 'Perfis e servidores extras para toda a família' },
-];
-
 // ─── Tabela de features por plano ────────────────────────────────────────────
-const PLAN_FEATURES: { feature: Feature; plans: PlanId[] }[] = [
-  { feature: 'explore',                  plans: ['plus', 'pro', 'ultra', 'lifetime'] },
-  { feature: 'downloads',                plans: ['plus', 'pro', 'ultra', 'lifetime'] },
-  { feature: 'lists',                    plans: ['plus', 'pro', 'ultra', 'lifetime'] },
-  { feature: 'cast_mirror',              plans: ['plus', 'pro', 'ultra', 'lifetime'] },
-  { feature: 'pip',                      plans: ['plus', 'pro', 'ultra', 'lifetime'] },
-  { feature: 'airplay',                  plans: ['pro', 'ultra', 'lifetime'] },
-  { feature: 'recommendation_algorithm', plans: ['pro', 'ultra', 'lifetime'] },
-  { feature: 'tmdb_details',             plans: ['pro', 'ultra', 'lifetime'] },
-  { feature: 'multi_user',               plans: ['pro', 'ultra', 'lifetime'] },
-  { feature: 'multi_server',             plans: ['pro', 'ultra', 'lifetime'] },
-  { feature: 'parental_controls',        plans: ['ultra', 'lifetime'] },
-  { feature: 'realtime_monitor',         plans: ['ultra', 'lifetime'] },
-  { feature: 'content_4k',               plans: ['ultra', 'lifetime'] },
-];
+function getFeatureInfo(content: SubscriptionPageContent, featureId: string) {
+  const fromRemote = content.featureLabels?.[featureId];
+  if (fromRemote) {
+    return fromRemote;
+  }
+
+  const fromDefault = (FEATURE_LABELS as Record<string, { label: string; icon: string; desc: string }>)[featureId];
+  if (fromDefault) {
+    return fromDefault;
+  }
+
+  return {
+    label: featureId,
+    icon: 'stars',
+    desc: 'Recurso premium do aplicativo',
+  };
+}
+
+function buildKnownFeatures(plans: Plan[], content: SubscriptionPageContent): string[] {
+  const fromPlans = plans.flatMap((plan) => Array.isArray(plan.features) ? plan.features : []);
+  const fromLabels = Object.keys(content.featureLabels || {});
+  const fromOrder = Array.isArray(content.compareOrder) ? content.compareOrder : [];
+  const union = Array.from(new Set([...fromOrder, ...fromPlans, ...fromLabels].map((item) => String(item || '').trim()).filter(Boolean)));
+  return union;
+}
+
+function buildPlanFeaturesMatrix(plans: Plan[], knownFeatures: string[]): Array<{ feature: string; plans: PlanId[] }> {
+  return knownFeatures.map((feature) => ({
+    feature,
+    plans: plans.filter((plan) => plan.id !== 'free' && plan.features.includes(feature)).map((plan) => plan.id),
+  }));
+}
 
 // ─── Subcomponentes ───────────────────────────────────────────────────────────
 function TriggerBadge({ icon, text }: { icon: keyof typeof MaterialIcons.glyphMap; text: string }) {
@@ -75,24 +84,26 @@ function TriggerBadge({ icon, text }: { icon: keyof typeof MaterialIcons.glyphMa
 
 type PlanCardProps = {
   plan: Plan;
+  allPlans: Plan[];
   isCurrent: boolean;
   isRecommended: boolean;
   onPress: () => void;
 };
 
-function PlanCard({ plan, isCurrent, isRecommended, onPress }: PlanCardProps) {
+function PlanCard({ plan, allPlans, isCurrent, isRecommended, onPress, knownFeatures, subscriptionContent }: PlanCardProps & { knownFeatures: string[]; subscriptionContent: SubscriptionPageContent }) {
   const scale = React.useRef(new Animated.Value(1)).current;
 
   const onPressIn = () => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true }).start();
   const onPressOut = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
 
-  const paidPlans = PLANS.filter((p) => p.id !== 'free');
+  const paidPlans = allPlans.filter((p) => p.id !== 'free');
   const planIndex = paidPlans.findIndex((p) => p.id === plan.id);
   const prevPlan = planIndex > 0 ? paidPlans[planIndex - 1] : null;
 
-  const exclusiveFeatures = PLAN_FEATURES.filter((pf) => {
-    const minPlan = pf.plans[0];
-    return minPlan === plan.id;
+  const exclusiveFeatures = knownFeatures.filter((feature) => {
+    if (!plan.features.includes(feature)) return false;
+    const firstPlanWithFeature = paidPlans.find((candidate) => candidate.features.includes(feature));
+    return firstPlanWithFeature?.id === plan.id;
   });
 
   return (
@@ -156,9 +167,9 @@ function PlanCard({ plan, isCurrent, isRecommended, onPress }: PlanCardProps) {
                 </View>
               )}
               {exclusiveFeatures.map((ef) => (
-                <View key={ef.feature} style={styles.planFeatureRow}>
-                  <MaterialIcons name={FEATURE_LABELS[ef.feature].icon as any} size={14} color={plan.color} />
-                  <Text style={styles.planFeatureText}>{FEATURE_LABELS[ef.feature].label}</Text>
+                <View key={ef} style={styles.planFeatureRow}>
+                  <MaterialIcons name={getFeatureInfo(subscriptionContent, ef).icon as any} size={14} color={plan.color} />
+                  <Text style={styles.planFeatureText}>{getFeatureInfo(subscriptionContent, ef).label}</Text>
                 </View>
               ))}
             </>
@@ -188,19 +199,38 @@ export default function AssinarScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<Params>();
   const [currentPlanId, setCurrentPlanId] = useState<PlanId>('free');
+  const [availablePlans, setAvailablePlans] = useState<Plan[]>(PLANS);
+  const [subscriptionContent, setSubscriptionContent] = useState<SubscriptionPageContent>({
+    triggers: [],
+    featureLabels: FEATURE_LABELS,
+    compareOrder: Object.keys(FEATURE_LABELS),
+  });
   const heroOpacity = React.useRef(new Animated.Value(0)).current;
   const heroY = React.useRef(new Animated.Value(24)).current;
 
   const lockedFeature = params.feature as Feature | undefined;
-  const minPlan = lockedFeature ? minPlanForFeature(lockedFeature) : null;
+  const knownFeatures = React.useMemo(
+    () => buildKnownFeatures(availablePlans, subscriptionContent),
+    [availablePlans, subscriptionContent]
+  );
+
+  const minPlan = React.useMemo(() => {
+    if (!lockedFeature) return null;
+    return availablePlans.find((plan) => plan.features.includes(lockedFeature)) || minPlanForFeature(lockedFeature);
+  }, [availablePlans, lockedFeature]);
 
   useEffect(() => {
+    getAvailablePlans().then(setAvailablePlans).catch(() => null);
+    getSubscriptionPageContent().then(setSubscriptionContent).catch(() => null);
     getActivePlanId().then(setCurrentPlanId);
     Animated.parallel([
       Animated.timing(heroOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.timing(heroY, { toValue: 0, duration: 500, useNativeDriver: true }),
     ]).start();
   }, []);
+
+  const planFeatures = React.useMemo(() => buildPlanFeaturesMatrix(availablePlans, knownFeatures), [availablePlans, knownFeatures]);
+  const paidPlans = availablePlans.filter((plan) => plan.id !== 'free');
 
   const openSubscription = (plan: Plan) => {
     if (plan.id === 'free') return;
@@ -234,14 +264,14 @@ export default function AssinarScreen() {
             <>
               <View style={[styles.lockBadge, { backgroundColor: (minPlan?.color ?? StreamingTheme.colors.accent) + '22' }]}>
                 <MaterialIcons
-                  name={FEATURE_LABELS[lockedFeature].icon as any}
+                  name={getFeatureInfo(subscriptionContent, lockedFeature).icon as any}
                   size={32}
                   color={minPlan?.color ?? StreamingTheme.colors.accent}
                 />
               </View>
               <Text style={styles.heroKicker}>RECURSO PREMIUM</Text>
-              <Text style={styles.heroTitle}>{FEATURE_LABELS[lockedFeature].label}</Text>
-              <Text style={styles.heroDesc}>{FEATURE_LABELS[lockedFeature].desc}</Text>
+              <Text style={styles.heroTitle}>{getFeatureInfo(subscriptionContent, lockedFeature).label}</Text>
+              <Text style={styles.heroDesc}>{getFeatureInfo(subscriptionContent, lockedFeature).desc}</Text>
               {minPlan && (
                 <Text style={styles.heroPlanHint}>
                   Disponível a partir do plano{' '}
@@ -265,20 +295,23 @@ export default function AssinarScreen() {
 
         {/* Gatilhos de valor */}
         <View style={styles.triggersGrid}>
-          {TRIGGERS.map((t) => (
+          {subscriptionContent.triggers.map((t) => (
             <TriggerBadge key={t.text} icon={t.icon} text={t.text} />
           ))}
         </View>
 
         {/* Planos */}
         <Text style={styles.sectionLabel}>COMPARE OS PLANOS</Text>
-        {PLANS.map((plan) => (
+        {availablePlans.map((plan) => (
           <PlanCard
             key={plan.id}
             plan={plan}
+            allPlans={availablePlans}
             isCurrent={plan.id === currentPlanId}
             isRecommended={!!plan.highlighted}
             onPress={() => openSubscription(plan)}
+            knownFeatures={knownFeatures}
+            subscriptionContent={subscriptionContent}
           />
         ))}
 
@@ -288,29 +321,29 @@ export default function AssinarScreen() {
           {/* Cabeçalho */}
           <View style={styles.compareHeader}>
             <Text style={[styles.compareColLabel, { flex: 2 }]}>Recurso</Text>
-            {['Plus', 'Pro', 'Ultra', 'Life'].map((n) => (
-              <Text key={n} style={styles.compareColLabel}>{n}</Text>
+            {paidPlans.map((plan) => (
+              <Text key={plan.id} style={styles.compareColLabel}>{plan.name}</Text>
             ))}
           </View>
           {/* Linhas */}
-          {PLAN_FEATURES.map(({ feature, plans }, i) => (
+          {planFeatures.map(({ feature, plans }, i) => (
             <View key={feature} style={[styles.compareRow, i % 2 === 1 && styles.compareRowAlt]}>
               <View style={[{ flex: 2 }, styles.compareFeatureCell]}>
                 <MaterialIcons
-                  name={FEATURE_LABELS[feature].icon as any}
+                    name={getFeatureInfo(subscriptionContent, feature).icon as any}
                   size={13}
                   color={StreamingTheme.colors.textMuted}
                 />
-                <Text style={styles.compareFeatureText}>{FEATURE_LABELS[feature].label}</Text>
+                <Text style={styles.compareFeatureText}>{getFeatureInfo(subscriptionContent, feature).label}</Text>
               </View>
-              {(['plus', 'pro', 'ultra', 'lifetime'] as PlanId[]).map((pid) => (
-                <View key={pid} style={styles.compareCheckCell}>
+              {paidPlans.map((plan) => (
+                <View key={plan.id} style={styles.compareCheckCell}>
                   <MaterialIcons
-                    name={plans.includes(pid) ? 'check' : 'close'}
+                    name={plans.includes(plan.id) ? 'check' : 'close'}
                     size={16}
                     color={
-                      plans.includes(pid)
-                        ? (PLANS.find((p) => p.id === pid)?.color ?? '#2CD07F')
+                      plans.includes(plan.id)
+                        ? (plan.color || '#2CD07F')
                         : 'rgba(127,137,168,0.3)'
                     }
                   />

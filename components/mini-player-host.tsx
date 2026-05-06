@@ -1,12 +1,10 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
-  AppState,
-  AppStateStatus,
   PanResponder,
   Platform,
   StyleSheet,
@@ -19,11 +17,20 @@ import { isPictureInPictureSupported, VideoView } from 'expo-video';
 
 import { usePlayback } from '@/components/playback-provider';
 import { StreamingTheme } from '@/constants/streaming-theme';
+import { getDbValue, setDbValue } from '@/services/local-db';
 import {
   clearMiniPlayerState,
   MiniPlayerState,
+  setMiniPlayerState,
   subscribeMiniPlayer,
 } from '@/services/mini-player';
+
+const MINI_PLAYER_POSITION_KEY = 'ui.mini-player.position.v1';
+
+type MiniPlayerCardPosition = {
+  x: number;
+  y: number;
+};
 
 const PLAYER_FALLBACK = {
   currentTime: 0,
@@ -41,6 +48,7 @@ export function MiniPlayerHost() {
   const BOTTOM_GAP = 84;
 
   const router = useRouter();
+  const pathname = usePathname();
   const { width, height } = useWindowDimensions();
   const videoViewRef = useRef<VideoView>(null);
   const isStartingPipRef = useRef(false);
@@ -52,7 +60,9 @@ export function MiniPlayerHost() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMiniLoading, setIsMiniLoading] = useState(true);
   const [hasMiniFrame, setHasMiniFrame] = useState(false);
+  const hasInitializedRef = useRef(false);
   const positionRef = useRef(0);
+  const savedCardPositionRef = useRef<MiniPlayerCardPosition | null>(null);
 
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -64,8 +74,32 @@ export function MiniPlayerHost() {
     return { minX, maxX, minY, maxY };
   };
 
+  const getDefaultCardPosition = (): MiniPlayerCardPosition => {
+    const { maxX, maxY } = getBounds();
+    return { x: maxX, y: maxY };
+  };
+
+  const clampCardPosition = (
+    nextPosition?: Partial<MiniPlayerCardPosition> | null
+  ): MiniPlayerCardPosition => {
+    const { minX, maxX, minY, maxY } = getBounds();
+    const fallback = getDefaultCardPosition();
+    const rawX = Number(nextPosition?.x);
+    const rawY = Number(nextPosition?.y);
+
+    return {
+      x: clamp(Number.isFinite(rawX) ? rawX : fallback.x, minX, maxX),
+      y: clamp(Number.isFinite(rawY) ? rawY : fallback.y, minY, maxY),
+    };
+  };
+
   const applyCardPosition = (x: number, y: number) => {
     cardPosition.setValue({ x, y });
+  };
+
+  const persistCardPosition = (nextPosition: MiniPlayerCardPosition) => {
+    savedCardPositionRef.current = nextPosition;
+    void setDbValue(MINI_PLAYER_POSITION_KEY, nextPosition);
   };
 
   const startSystemPip = async (showError: boolean) => {
@@ -91,6 +125,15 @@ export function MiniPlayerHost() {
       setTimeout(() => {
         isStartingPipRef.current = false;
       }, 500);
+    }
+  };
+
+  const stopSystemPip = async () => {
+    if (Platform.OS !== 'android') return;
+    try {
+      await videoViewRef.current?.stopPictureInPicture?.();
+    } catch {
+      // ignora
     }
   };
 
@@ -135,15 +178,17 @@ export function MiniPlayerHost() {
               return;
             }
 
+            const clampedX = clamp(value.x, minX, maxX);
             const clampedY = clamp(value.y, minY, maxY);
-            const middleX = (minX + maxX) / 2;
-            const snapX = value.x <= middleX ? minX : maxX;
+            const nextPosition = { x: clampedX, y: clampedY };
 
             Animated.spring(cardPosition, {
-              toValue: { x: snapX, y: clampedY },
+              toValue: nextPosition,
               useNativeDriver: false,
               bounciness: 4,
-            }).start();
+            }).start(() => {
+              persistCardPosition(nextPosition);
+            });
           });
         },
       }),
@@ -159,13 +204,28 @@ export function MiniPlayerHost() {
   }, []);
 
   useEffect(() => {
-    if (!miniPlayerState?.url) return;
+    if (!miniPlayerState?.url) {
+      hasInitializedRef.current = false;
+      return;
+    }
 
-    setHasMiniFrame(false);
-    setIsMiniLoading(true);
-    playbackPlayer.play();
-    setIsPlaying(true);
-  }, [miniPlayerState?.url, playbackPlayer]);
+    // Reset flag ao trocar de URL
+    if (!hasInitializedRef.current) {
+      hasInitializedRef.current = true;
+      setHasMiniFrame(false);
+      setIsMiniLoading(true);
+      
+      // Sincroniza para o tempo armazenado do mini-player apenas na PRIMEIRA inicialização
+      const startPositionSec = (miniPlayerState.positionMs || 0) / 1000;
+      if (startPositionSec > 0) {
+        playbackPlayer.currentTime = startPositionSec;
+        positionRef.current = miniPlayerState.positionMs || 0;
+      }
+      
+      playbackPlayer.play();
+      setIsPlaying(true);
+    }
+  }, [miniPlayerState?.url]);
 
   useEffect(() => {
     if (!miniPlayerState?.url) return;
@@ -185,18 +245,21 @@ export function MiniPlayerHost() {
         playbackPlayer.play();
       }),
       playbackPlayer.addListener('timeUpdate', ({ currentTime }: any) => {
-        positionRef.current = Math.max(0, Math.floor(currentTime * 1000));
+        const positionMs = Math.max(0, Math.floor(currentTime * 1000));
+        positionRef.current = positionMs;
+        // Atualiza posição no estado compartilhado (importante para expandir sem perder progresso)
+        setMiniPlayerState((prev) => (prev ? { ...prev, positionMs } : prev));
         if (currentTime > 0 && !hasMiniFrame) {
           setHasMiniFrame(true);
           setIsMiniLoading(false);
         }
-      }),
+      })
     ];
 
     return () => {
       subscriptions.forEach((sub) => sub.remove());
     };
-  }, [miniPlayerState?.url, playbackPlayer, hasMiniFrame]);
+  }, [miniPlayerState?.url, hasMiniFrame]);
 
   useEffect(() => {
     if (!miniPlayerState?.url) {
@@ -204,33 +267,41 @@ export function MiniPlayerHost() {
       return;
     }
 
-    const { minX, maxX, minY, maxY } = getBounds();
+    let cancelled = false;
 
     if (!hasInitialCardPositionRef.current) {
-      applyCardPosition(maxX, maxY);
-      hasInitialCardPositionRef.current = true;
-      return;
+      void getDbValue<MiniPlayerCardPosition>(MINI_PLAYER_POSITION_KEY).then((storedPosition) => {
+        if (cancelled) {
+          return;
+        }
+        const nextPosition = clampCardPosition(storedPosition || getDefaultCardPosition());
+        applyCardPosition(nextPosition.x, nextPosition.y);
+        savedCardPositionRef.current = nextPosition;
+        hasInitialCardPositionRef.current = true;
+      });
+
+      return () => {
+        cancelled = true;
+      };
     }
 
-    cardPosition.stopAnimation((value: any) => {
-      applyCardPosition(clamp(value.x, minX, maxX), clamp(value.y, minY, maxY));
-    });
+    const nextPosition = clampCardPosition(savedCardPositionRef.current || getDefaultCardPosition());
+    applyCardPosition(nextPosition.x, nextPosition.y);
+    savedCardPositionRef.current = nextPosition;
+
+    return () => {
+      cancelled = true;
+    };
   }, [miniPlayerState?.url, width, height]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android' || !miniPlayerState?.url) return;
+  // AppState listener REMOVIDO - PiP automático causava bugs
+  // O PiP agora é controlado apenas manualmente pelo usuário ou pelo player.tsx
 
-    const onStateChange = async (nextState: AppStateStatus) => {
-      if ((nextState !== 'inactive' && nextState !== 'background') || isStartingPipRef.current) return;
-
-      await startSystemPip(false);
-    };
-
-    const subscription = AppState.addEventListener('change', onStateChange);
-    return () => {
-      subscription.remove();
-    };
-  }, [miniPlayerState?.url]);
+  // Nunca renderiza o mini player por cima da tela principal do player.
+  // Isso evita duas VideoView tentando usar o mesmo objeto de player.
+  if (String(pathname || '').startsWith('/player')) {
+    return null;
+  }
 
   if (!miniPlayerState?.url || !player) {
     return null;
@@ -258,7 +329,17 @@ export function MiniPlayerHost() {
     const precisePositionMs = Math.max(0, Math.floor((playbackPlayer.currentTime || 0) * 1000));
     const lastPositionMs = precisePositionMs || positionRef.current || miniPlayerState.positionMs || 0;
     const snapshot = miniPlayerState;
-    clearMiniPlayerState();
+    
+    // Para o PiP nativo quando expandir
+    void stopSystemPip();
+    
+    // Pausa o player mas NÃO limpa o estado ainda
+    // Deixa o player.tsx tomar controle da reprodução
+    try {
+      playbackPlayer.pause();
+    } catch {
+      // ignora
+    }
 
     router.push({
       pathname: '/player',
@@ -273,6 +354,11 @@ export function MiniPlayerHost() {
         startPositionMs: String(lastPositionMs),
       },
     });
+    
+    // Limpa o estado após um delay para garantir que a navegação aconteça
+    setTimeout(() => {
+      clearMiniPlayerState();
+    }, 300);
   };
 
   return (

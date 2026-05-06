@@ -11,14 +11,60 @@ type RecommendationChipProps = {
   overlay?: boolean;
   numberOfLines?: number;
   style?: StyleProp<ViewStyle>;
+  seed?: string;
 };
 
 const TOKENS: Array<{ kind: ReasonKind; test: (text: string) => boolean }> = [
-  { kind: 'genre', test: (text) => text.includes('interesse') },
-  { kind: 'category', test: (text) => text.includes('assiste bastante') },
-  { kind: 'history', test: (text) => text.includes('parecido com conteudos') },
-  { kind: 'time', test: (text) => text.includes('horario que voce costuma assistir') },
-  { kind: 'weekend', test: (text) => text.includes('fim de semana') },
+  {
+    kind: 'genre',
+    test: (text) =>
+      text.includes('ação') ||
+      text.includes('acao') ||
+      text.includes('comédia') ||
+      text.includes('comedia') ||
+      text.includes('drama') ||
+      text.includes('suspense') ||
+      text.includes('romance') ||
+      text.includes('ficção') ||
+      text.includes('ficcao') ||
+      text.includes('história viciante') ||
+      text.includes('historia viciante') ||
+      text.includes('para maratonar') ||
+      text.includes('para rir'),
+  },
+  {
+    kind: 'category',
+    test: (text) =>
+      text.includes('categoria') ||
+      text.includes('consome bastante') ||
+      text.includes('alta afinidade'),
+  },
+  {
+    kind: 'history',
+    test: (text) =>
+      text.includes('histórico') ||
+      text.includes('historico') ||
+      text.includes('parecido') ||
+      text.includes('seu perfil') ||
+      text.includes('seu tipo') ||
+      text.includes('você parou') ||
+      text.includes('voce parou') ||
+      text.includes('retome') ||
+      text.includes('continue'),
+  },
+  {
+    kind: 'time',
+    test: (text) =>
+      text.includes('agora') ||
+      text.includes('horário') ||
+      text.includes('horario') ||
+      text.includes('noite') ||
+      text.includes('tarde') ||
+      text.includes('manhã') ||
+      text.includes('manha') ||
+      text.includes('momento'),
+  },
+  { kind: 'weekend', test: (text) => text.includes('fim de semana') || text.includes('maratona de fim de semana') },
 ];
 
 const KIND_META: Record<ReasonKind, { icon: keyof typeof MaterialIcons.glyphMap; tint: string }> = {
@@ -29,6 +75,8 @@ const KIND_META: Record<ReasonKind, { icon: keyof typeof MaterialIcons.glyphMap;
   weekend: { icon: 'weekend', tint: '#FFD166' },
   general: { icon: 'auto-awesome', tint: StreamingTheme.colors.accentAlt },
 };
+
+const TINT_VARIANTS = ['#FF9F43', '#46D7B7', '#5DA8FF', '#C48BFF', '#FFD166', '#FF6B6B', '#4ECDC4'];
 
 function detectReasonKind(reason: string): ReasonKind {
   const normalized = reason.trim().toLowerCase();
@@ -45,17 +93,28 @@ function toRgba(hex: string, alpha: number) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+function hashSeed(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
 export function RecommendationChip({
   reason,
   overlay = false,
   numberOfLines = 1,
   style,
+  seed,
 }: RecommendationChipProps) {
   if (!reason) return null;
 
   const kind = detectReasonKind(reason);
   const meta = KIND_META[kind];
-  const tint = meta.tint;
+  const tint = seed
+    ? TINT_VARIANTS[hashSeed(`${seed}-${kind}`) % TINT_VARIANTS.length]
+    : meta.tint;
 
   return (
     <View

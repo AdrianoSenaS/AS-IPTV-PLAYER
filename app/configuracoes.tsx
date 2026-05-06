@@ -1,4 +1,5 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -20,7 +21,7 @@ type HubState = {
 };
 
 const emptyHub: HubState = {
-	activeServerName: 'Nao definido',
+	activeServerName: 'Não definido',
 	activeProfileName: '-',
 	accountName: 'Visitante',
 	accountEmail: 'Sem login',
@@ -42,7 +43,7 @@ export default function ConfiguracoesHubScreen() {
 			const activeServer = settings.servers.find((item) => item.id === settings.activeServerId);
 			const activeProfile = settings.profiles.find((item) => item.id === settings.activeProfileId);
 			setHub({
-				activeServerName: activeServer?.name || 'Nao definido',
+				activeServerName: activeServer?.name || 'Não definido',
 				activeProfileName: activeProfile?.name || '-',
 				accountName: session?.user?.name || 'Visitante',
 				accountEmail: session?.user?.email || 'Sem login',
@@ -62,7 +63,7 @@ export default function ConfiguracoesHubScreen() {
 	const cards = useMemo(
 		() => [
 			{
-				title: 'Conta do usuario',
+				title: 'Conta do usuário',
 				subtitle: 'Cadastro local, login e foto do perfil principal.',
 				icon: 'person',
 				route: '/configuracoes-conta',
@@ -70,7 +71,7 @@ export default function ConfiguracoesHubScreen() {
 			},
 			{
 				title: 'Backup e sincronizacao',
-				subtitle: 'Sincronize em nuvem local do app: filmes, series, listas e servidores.',
+				subtitle: 'Sincronize em nuvem local do app: filmes, séries, listas e servidores.',
 				icon: 'backup',
 				route: '/configuracoes-backup',
 				feature: null as string | null,
@@ -91,10 +92,24 @@ export default function ConfiguracoesHubScreen() {
 			},
 			{
 				title: 'Controle dos pais',
-				subtitle: 'PIN mestre, bloqueio e protecao de configuracoes.',
+				subtitle: 'PIN mestre, bloqueio e proteção de configurações.',
 				icon: 'shield',
 				route: '/configuracoes-parental',
 				feature: 'parental_controls' as string | null,
+			},
+			{
+				title: 'IA e aprendizado',
+				subtitle: 'Ative/desative o algoritmo e ajuste o filtro de aprendizado.',
+				icon: 'auto-awesome',
+				route: '/configuracoes-ia',
+				feature: 'recommendation_algorithm' as string | null,
+			},
+			{
+				title: 'Proxy de rede',
+				subtitle: 'Gerencie ativação do proxy e confira se o roteamento está funcionando.',
+				icon: 'vpn-lock',
+				route: '/configuracoes-proxy',
+				feature: 'network_proxy' as string | null,
 			},
 		],
 		[]
@@ -104,7 +119,7 @@ export default function ConfiguracoesHubScreen() {
 		<SafeAreaView style={styles.container}>
 			<StatusBar barStyle="light-content" />
 			<AppBackdrop blurIntensity={28} />
-			<PageLoader visible={isLoading} label="Carregando configuracoes" />
+			<PageLoader visible={isLoading} label="Carregando configurações" />
 
 			<ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 				<View style={styles.headerRow}>
@@ -113,7 +128,7 @@ export default function ConfiguracoesHubScreen() {
 					</TouchableOpacity>
 					<View style={styles.headerTextWrap}>
 						<Text style={styles.kicker}>PAINEL PREMIUM</Text>
-						<Text style={styles.title}>Configuracoes</Text>
+						<Text style={styles.title}>Configurações</Text>
 					</View>
 					<View style={styles.iconBtn} />
 				</View>
@@ -140,8 +155,8 @@ export default function ConfiguracoesHubScreen() {
 							key={card.title}
 							style={[styles.card, cardLocked && styles.cardLocked]}
 							onPress={() => {
-								if (!planLoading && card.route === '/configuracoes-parental' && !hasFeature('parental_controls')) {
-									router.push('/assinar?feature=parental_controls');
+								if (!planLoading && cardLocked && card.feature) {
+									router.push({ pathname: '/assinar', params: { feature: card.feature } } as any);
 									return;
 								}
 								router.push(card.route as any);

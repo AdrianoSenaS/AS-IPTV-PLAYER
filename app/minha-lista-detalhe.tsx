@@ -1,5 +1,6 @@
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
+import { Image } from 'expo-image';
+
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -271,8 +272,9 @@ export default function MinhaListaDetalheScreen() {
 
       <Text style={styles.sectionTitle}>Conteudos da lista</Text>
       <FlatList
-        data={list.items}
+        data={filter === 'all' ? list.items : list.items.filter((i) => i.type === filter)}
         keyExtractor={(item) => item.id}
+        extraData={list}
         numColumns={3}
         contentContainerStyle={styles.listContent}
         columnWrapperStyle={styles.columnWrap}
@@ -436,8 +438,9 @@ const styles = StyleSheet.create({
     paddingBottom: 120,
   },
   columnWrap: {
-    justifyContent: 'space-between',
-    marginBottom: 14,
+    justifyContent: 'flex-start',
+    gap: 8,
+    marginBottom: 10,
   },
   card: {
     width: '31%',

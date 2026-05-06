@@ -1,4 +1,6 @@
 import { getDbValue, setDbValue } from '@/services/local-db';
+import { scheduleAutoCloudBackup } from '@/services/backup-background';
+import { loadProfileScopedValue, saveProfileScopedValue } from '@/services/profile-scoped-storage';
 
 export type ListContentType = 'movie' | 'series' | 'live';
 
@@ -23,18 +25,34 @@ export type UserList = {
 
 const STORAGE_KEY = 'user_lists_v1';
 const LISTS_DB_KEY = 'user_lists_v2';
+const IMMEDIATE_SYNC_INTERVAL_MS = 20_000;
+let lastImmediateSyncAt = 0;
 
 const normalizeName = (value: string) => value.trim().replace(/\s{2,}/g, ' ');
 
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
+function triggerImmediateProfileSyncIfNeeded() {
+  const now = Date.now();
+  if (now - lastImmediateSyncAt < IMMEDIATE_SYNC_INTERVAL_MS) {
+    return;
+  }
+
+  lastImmediateSyncAt = now;
+  import('@/services/cloud-sync')
+    .then(({ triggerImmediateSync }) => triggerImmediateSync())
+    .catch(() => null);
+}
+
 async function persist(lists: UserList[]) {
-  await setDbValue(LISTS_DB_KEY, lists);
+  await saveProfileScopedValue(LISTS_DB_KEY, lists);
+  scheduleAutoCloudBackup();
+  triggerImmediateProfileSyncIfNeeded();
 }
 
 export async function loadUserLists(): Promise<UserList[]> {
   try {
-    const fromDb = await getDbValue<UserList[]>(LISTS_DB_KEY);
+    const fromDb = await loadProfileScopedValue<UserList[]>(LISTS_DB_KEY, []);
     const parsed = Array.isArray(fromDb) ? fromDb : [];
     if (!Array.isArray(parsed)) return [] as UserList[];
 
@@ -64,7 +82,7 @@ export async function loadUserLists(): Promise<UserList[]> {
       .sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : 1));
 
     if (normalized.length > 0) {
-      await setDbValue(LISTS_DB_KEY, normalized);
+      await saveProfileScopedValue(LISTS_DB_KEY, normalized);
     }
 
     return normalized;
@@ -172,4 +190,38 @@ export async function removeItemFromList(listId: string, itemId: string) {
 
   await persist(updated);
   return updated;
+}
+
+/**
+ * Verifica se um item está em qualquer lista do usuário
+ */
+export async function isItemInAnyList(
+  contentId: string,
+  type: ListContentType
+): Promise<boolean> {
+  const lists = await loadUserLists();
+  return lists.some((list) =>
+    list.items.some(
+      (item) => item.type === type && item.contentId === contentId
+    )
+  );
+}
+
+/**
+ * Retorna todos os items com um contentId em todas as listas
+ */
+export async function getItemsInAllLists(
+  contentId: string,
+  type: ListContentType
+): Promise<UserListItem[]> {
+  const lists = await loadUserLists();
+  const result: UserListItem[] = [];
+  lists.forEach((list) => {
+    list.items.forEach((item) => {
+      if (item.type === type && item.contentId === contentId) {
+        result.push(item);
+      }
+    });
+  });
+  return result;
 }

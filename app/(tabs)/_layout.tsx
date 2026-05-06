@@ -1,7 +1,7 @@
 import { Tabs, useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, AppStateStatus, InteractionManager, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -11,9 +11,11 @@ import {
   lockProfileAccessIfMultipleProfiles,
   shouldRequireProfileSelection,
 } from '@/services/access-control';
+import { shouldShowAlgorithmOnboarding } from '@/services/behavior-intelligence';
 import { Feature, getActivePlan } from '@/services/subscription';
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { MiniCastBar } from '@/components/mini-cast-bar';
 import { StreamingTheme } from '@/constants/streaming-theme';
 
 function FloatingTabBackground() {
@@ -65,6 +67,12 @@ export default function TabLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [planFeatures, setPlanFeatures] = useState<Set<Feature> | null>(null);
+  // Timestamp em que o app entrou em background. 0 = nao esta em background.
+  const backgroundSinceRef = useRef(0);
+  // Tempo minimo em background para acionar bloqueio de perfil e redirecionar.
+  // Abaixo desse limite (PiP, crop de foto, notificacoes, espelhamento),
+  // o app retorna ao mesmo estado sem nenhuma interrupcao.
+  const RELOCK_AFTER_BG_MS = 30_000;
 
   const loadPlanFeatures = useCallback(async () => {
     const activePlan = await getActivePlan();
@@ -101,11 +109,28 @@ export default function TabLayout() {
     }
   }, [planFeatures, router]);
 
+  // Garante que o guard do onboarding de IA so dispare uma vez por montagem.
+  // Re-runs causariam loop: tabs → algoritmo-preferencias → loading → tabs → repeat.
+  const algorithmGuardRanRef = useRef(false);
+
   useEffect(() => {
+    if (algorithmGuardRanRef.current) return;
+    algorithmGuardRanRef.current = true;
+
     const guard = async () => {
       const requireSelection = await shouldRequireProfileSelection();
       if (requireSelection && !(await isProfileUnlocked())) {
         router.replace('/perfil-acesso');
+        return;
+      }
+
+      const shouldOpenAlgorithmSetup = await shouldShowAlgorithmOnboarding();
+      if (shouldOpenAlgorithmSetup) {
+        // Usa replace (nao push) para que o botao voltar nao retorne para /(tabs)
+        // com a IA ainda pendente. Se o usuario pressionasse voltar na tela de IA,
+        // o componente remontaria com algorithmGuardRanRef=false e a IA apareceria
+        // novamente (bug de IA dupla reportado pelo usuario).
+        router.replace('/algoritmo-preferencias');
       }
     };
 
@@ -114,16 +139,36 @@ export default function TabLayout() {
 
   useEffect(() => {
     const onStateChange = async (nextState: AppStateStatus) => {
-      if (nextState === 'inactive' || nextState === 'background') {
-        await lockProfileAccessIfMultipleProfiles();
+      // 'inactive' e sempre transitorio (PiP, notifications, crop nativo, espelhamento).
+      // Ignoramos completamente para nao interromper o estado do app.
+      if (nextState === 'inactive') {
+        return;
+      }
+
+      if (nextState === 'background') {
+        // Apenas registra o momento em que foi para background.
+        // O bloqueio so ocorre se o usuario demorar a voltar.
+        backgroundSinceRef.current = Date.now();
         return;
       }
 
       if (nextState === 'active') {
+        const bgDuration =
+          backgroundSinceRef.current > 0 ? Date.now() - backgroundSinceRef.current : 0;
+        backgroundSinceRef.current = 0;
+
+        // Sempre recarrega features do plano (operacao leve).
         await loadPlanFeatures().catch(() => {
           setPlanFeatures(null);
         });
 
+        // Background curto (PiP, crop, troca rapida): nao bloqueia nem redireciona.
+        if (bgDuration < RELOCK_AFTER_BG_MS) {
+          return;
+        }
+
+        // Background longo: bloqueia e verifica se precisa selecionar perfil.
+        await lockProfileAccessIfMultipleProfiles();
         const requireSelection = await shouldRequireProfileSelection();
         if (requireSelection && !(await isProfileUnlocked())) {
           router.replace('/perfil-acesso');
@@ -135,7 +180,7 @@ export default function TabLayout() {
     return () => {
       subscription.remove();
     };
-  }, [loadPlanFeatures, router]);
+  }, [loadPlanFeatures, router, RELOCK_AFTER_BG_MS]);
 
   const exploreListener = useMemo(
     () => ({ tabPress: gateTabPressSync('explore') }),
@@ -153,88 +198,97 @@ export default function TabLayout() {
   );
 
   return (
-    <Tabs
-      detachInactiveScreens={false}
-      screenOptions={{
-        lazy: false,
-        freezeOnBlur: false,
-        animation: 'fade',
-        sceneStyle: {
-          backgroundColor: 'transparent',
-        },
-        tabBarActiveTintColor: '#FFFFFF',
-        tabBarInactiveTintColor: 'rgba(168,178,209,0.55)',
-        tabBarShowLabel: false,
-        headerShown: false,
-        tabBarButton: HapticTab,
-        tabBarActiveBackgroundColor: 'rgba(255,255,255,0.08)',
-        tabBarBackground: () => <FloatingTabBackground />,
-        tabBarStyle: {
-          position: 'absolute',
-          bottom: insets.bottom + 10,
-          left: 16,
-          right: 16,
-          height: 78,
-          borderRadius: 30,
-          backgroundColor: 'transparent',
-          borderTopWidth: 0,
-          elevation: 26,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 10 },
-          shadowOpacity: 0.48,
-          shadowRadius: 22,
-          overflow: 'hidden',
-        },
-        tabBarItemStyle: {
-          marginVertical: 8,
-          marginHorizontal: 4,
-          borderRadius: 22,
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-        },
-        tabBarIconStyle: {
-          marginBottom: 0,
-        },
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={30} name="house.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={30} name="paperplane.fill" color={color} />,
-        }}
-        listeners={exploreListener}
-      />
-      <Tabs.Screen
-        name="offline"
-        options={{
-          title: 'Downloads',
-          tabBarIcon: ({ color }) => <MaterialIcons size={30} name="download" color={color} />,
-        }}
-        listeners={offlineListener}
-      />
-      <Tabs.Screen
-        name="listas"
-        options={{
-          title: 'Listas',
-          tabBarIcon: ({ color }) => <MaterialIcons size={30} name="library-music" color={color} />,
-        }}
-        listeners={listsListener}
-      />
-      <Tabs.Screen
-        name="configuracoes"
-        options={{
-          title: 'Conta',
-          tabBarIcon: ({ color }) => <MaterialIcons size={30} name="settings" color={color} />,
-        }}
-      />
-    </Tabs>
+    <View style={{ flex: 1 }}>
+      <Tabs
+        detachInactiveScreens={false}
+        screenOptions={{
+          lazy: false,
+          freezeOnBlur: false,
+          animation: 'fade',
+          sceneStyle: {
+            backgroundColor: 'transparent',
+          },
+          tabBarActiveTintColor: '#FFFFFF',
+          tabBarInactiveTintColor: 'rgba(168,178,209,0.55)',
+          tabBarShowLabel: true,
+          tabBarLabelStyle: {
+            fontSize: 11,
+            fontWeight: '700',
+            marginTop: 4,
+            marginBottom: 2,
+          },
+          headerShown: false,
+          tabBarButton: HapticTab,
+          tabBarActiveBackgroundColor: 'transparent',
+          tabBarBackground: () => <FloatingTabBackground />,
+          tabBarStyle: {
+            position: 'absolute',
+            bottom: insets.bottom + 10,
+            left: 16,
+            right: 16,
+            height: 84,
+            borderRadius: 30,
+            backgroundColor: 'transparent',
+            borderTopWidth: 0,
+            elevation: 26,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.48,
+            shadowRadius: 22,
+            overflow: 'hidden',
+          },
+          tabBarItemStyle: {
+            marginVertical: 8,
+            marginHorizontal: 4,
+            borderRadius: 22,
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          tabBarIconStyle: {
+            marginBottom: 0,
+          },
+        }}>
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Home',
+            tabBarIcon: ({ color }) => <IconSymbol size={33} name="house.fill" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="explore"
+          options={{
+            title: 'Explore',
+            tabBarIcon: ({ color }) => <IconSymbol size={33} name="paperplane.fill" color={color} />,
+          }}
+          listeners={exploreListener}
+        />
+        <Tabs.Screen
+          name="offline"
+          options={{
+            title: 'Downloads',
+            tabBarIcon: ({ color }) => <MaterialIcons size={33} name="download" color={color} />,
+          }}
+          listeners={offlineListener}
+        />
+        <Tabs.Screen
+          name="listas"
+          options={{
+            title: 'Listas',
+            tabBarIcon: ({ color }) => <MaterialIcons size={33} name="library-music" color={color} />,
+          }}
+          listeners={listsListener}
+        />
+        <Tabs.Screen
+          name="configuracoes"
+          options={{
+            title: 'Conta',
+            tabBarIcon: ({ color }) => <MaterialIcons size={33} name="settings" color={color} />,
+          }}
+        />
+      </Tabs>
+      <MiniCastBar bottomOffset={insets.bottom + 96} />
+    </View>
   );
 }

@@ -2,16 +2,23 @@
   "expo": {
     "name": "As Iptv Player",
     "slug": "as-iptv",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "asiptv",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "fetch"
+        ]
+      }
     },
     "android": {
       "package": "com.adrianosena.asiptv",
+      "icon": "./assets/images/icon.png",
+      "versionCode": 5,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "INTERNET",
@@ -20,7 +27,8 @@
         "READ_MEDIA_VIDEO",
         "READ_MEDIA_AUDIO",
         "POST_NOTIFICATIONS",
-        "FOREGROUND_SERVICE"
+        "FOREGROUND_SERVICE",
+        "RECEIVE_BOOT_COMPLETED"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -68,7 +76,8 @@
       [
         "react-native-google-cast",
         {
-          "expandedController": true
+          "expandedController": true,
+          "receiverAppId": "CC1AD845"
         }
       ],
       [
@@ -77,7 +86,7 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#000000",
           "dark": {
             "backgroundColor": "#000000"
           }

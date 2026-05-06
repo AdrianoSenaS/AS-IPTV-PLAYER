@@ -10,9 +10,15 @@
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "cors": "^2.8.5",
+    "expo-brightness": "~55.0.13",
+    "expo-image-manipulator": "~55.0.15",
+    "expo-image-picker": "~55.0.19",
+    "expo-notifications": "~55.0.22",
+    "expo-screen-orientation": "~55.0.13",
+    "expo-video": "~55.0.15",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
-    "socket.io": "^4.7.5",
+    "multer": "^1.4.5-lts.2",
     "uuid": "^11.0.3"
   },
   "engines": {

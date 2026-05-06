@@ -3,153 +3,1627 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Painel Admin - AS IPTV</title>
+  <title>AS IPTV Admin</title>
   <style>
     * { box-sizing: border-box; }
     :root {
-      --bg: #07090f;
-      --surface: #161b2e;
-      --surface-alt: #1c2340;
+      --bg: #07101d;
+      --bg-soft: #0c1628;
+      --card: rgba(17, 28, 47, 0.86);
+      --card-strong: rgba(13, 21, 38, 0.96);
       --border: rgba(255,255,255,0.12);
-      --text: #f7f9ff;
-      --muted: #a8b2d1;
-      --accent: #ff3b30;
-      --accent-alt: #ff8f3a;
-      --ok: #2cd07f;
+      --text: #f4f7ff;
+      --muted: #9fabc7;
+      --accent: #ff7b00;
+      --accent-2: #ff4d3b;
+      --ok: #2fd08a;
       --warn: #ffc857;
+      --danger: #ff7b7b;
+      --shadow: 0 18px 42px rgba(0,0,0,0.33);
     }
     body {
       margin: 0;
-      font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
-      background: radial-gradient(1200px 500px at 50% -10%, #1e0e2f, #0d1a38 45%, #07090f 100%);
+      min-height: 100vh;
       color: var(--text);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background:
+        radial-gradient(1000px 600px at -10% -10%, rgba(255,123,0,0.2), transparent 60%),
+        radial-gradient(900px 560px at 110% -15%, rgba(255,77,59,0.18), transparent 62%),
+        linear-gradient(180deg, #091325 0%, #050d19 100%);
     }
-    .container {
-      width: min(1200px, 96%);
-      margin: 24px auto 48px;
+    .shell {
+      width: min(1760px, 97%);
+      margin: 16px auto 28px;
     }
+    .hidden { display: none !important; }
+    .status { min-height: 20px; color: var(--muted); font-size: 0.9rem; }
+    .status.ok { color: var(--ok); }
+    .status.error { color: var(--danger); }
     .card {
-      background: rgba(255,255,255,0.05);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 18px;
-      backdrop-filter: blur(14px);
-      margin-bottom: 16px;
+      border-radius: 18px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+      padding: 14px;
     }
-    .row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
+    .login-card {
+      max-width: 700px;
+      margin: 90px auto 0;
     }
-    h1 {
-      font-size: 1.4rem;
+    .login-title {
       margin: 0;
-      letter-spacing: -0.5px;
+      font-size: 1.9rem;
+      font-weight: 900;
+      letter-spacing: -0.03em;
     }
-    .muted { color: var(--muted); font-size: 0.92rem; }
-    input, select {
-      background: var(--surface);
+    .muted { color: var(--muted); }
+    .small { font-size: 0.88rem; }
+    input, select, textarea, button {
+      min-height: 40px;
+      border-radius: 11px;
       border: 1px solid var(--border);
+      outline: none;
+      font-size: 0.92rem;
+    }
+    input, select, textarea {
+      width: 100%;
       color: var(--text);
-      border-radius: 10px;
-      padding: 10px 12px;
-      min-height: 42px;
+      background: rgba(7, 12, 22, 0.76);
+      padding: 8px 10px;
+    }
+    input[type="checkbox"] {
+      appearance: auto !important;
+      -webkit-appearance: checkbox !important;
+      width: 14px !important;
+      height: 14px !important;
+      min-width: 14px !important;
+      min-height: 14px !important;
+      max-width: 14px !important;
+      max-height: 14px !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      vertical-align: middle;
+      accent-color: var(--accent);
+      border-radius: 3px;
+      flex: 0 0 auto;
+    }
+    label.small.muted {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    textarea {
+      min-height: 200px;
+      resize: vertical;
+      font-family: Consolas, monospace;
+      line-height: 1.4;
+      font-size: 0.82rem;
     }
     button {
-      border: 0;
-      border-radius: 10px;
-      min-height: 42px;
-      padding: 0 14px;
       cursor: pointer;
-      font-weight: 700;
+      border: 0;
       color: #fff;
-      background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+      font-weight: 800;
+      padding: 0 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
     }
-    button.ghost {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text);
-    }
-    .grid {
+    button.ghost { border: 1px solid var(--border); background: rgba(255,255,255,0.04); }
+    button.warn { background: linear-gradient(135deg, #b8860b, #ff9f43); }
+    button.danger { background: linear-gradient(135deg, #a61f2f, #ff5f6d); }
+
+    .app-layout {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 12px;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
     }
-    .user-card {
-      background: var(--surface-alt);
+    .sidebar {
+      position: sticky;
+      top: 12px;
+      display: grid;
+      gap: 12px;
+      background: var(--card-strong);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 20px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+    .brand {
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
       padding: 12px;
     }
-    .pill {
-      display: inline-block;
-      font-size: 0.72rem;
-      padding: 2px 8px;
-      border-radius: 999px;
-      margin-right: 6px;
+    .brand h2 {
+      margin: 0;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+    .route-btn {
+      width: 100%;
+      text-align: left;
+      justify-content: flex-start;
+      min-height: 44px;
+      border-radius: 12px;
       border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
       color: var(--muted);
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 12px;
+      cursor: pointer;
     }
-    .pill.ok { border-color: rgba(44,208,127,0.5); color: var(--ok); }
-    .pill.off { border-color: rgba(255,59,48,0.5); color: var(--accent); }
-    .status {
+    .route-btn.active {
+      color: #fff;
+      border-color: rgba(255,123,0,0.56);
+      background: linear-gradient(135deg, rgba(255,123,0,0.24), rgba(255,77,59,0.12));
+    }
+
+    .main {
+      display: grid;
+      gap: 12px;
+    }
+    .main-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--card-strong);
+      box-shadow: var(--shadow);
+    }
+    .main-top h1 {
+      margin: 0;
+      font-size: 1.2rem;
+      letter-spacing: -0.02em;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .grid { display: grid; gap: 12px; }
+    .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+    .kpi-card {
+      border-radius: 15px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      padding: 12px;
+    }
+    .kpi-label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .kpi-value {
+      margin-top: 7px;
+      font-size: 1.58rem;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+    }
+    .page { display: none; }
+    .page.active { display: grid; gap: 12px; }
+
+    .chart-box {
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      padding: 10px;
+      display: grid;
+      gap: 7px;
+    }
+    .bar-row {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr) 80px;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.86rem;
+    }
+    .bar-bg {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }
+
+    .users-layout {
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr);
+      gap: 12px;
+    }
+    .users-list {
+      max-height: 72vh;
+      overflow: auto;
+      display: grid;
+      gap: 8px;
+      padding-right: 4px;
+    }
+    .user-item {
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: rgba(255,255,255,0.03);
+      padding: 10px;
+      cursor: pointer;
+    }
+    .user-item.active {
+      border-color: rgba(255,123,0,0.6);
+      background: rgba(255,123,0,0.13);
+    }
+    .user-item h4 { margin: 0 0 4px; font-size: 0.97rem; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+      padding: 0 9px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .pill.ok { color: var(--ok); border-color: rgba(47,208,138,0.5); }
+    .pill.warn { color: var(--warn); border-color: rgba(255,200,87,0.5); }
+    .pill.danger { color: var(--danger); border-color: rgba(255,123,123,0.5); }
+    .section-title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .sub-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 9px; }
+    .line-card {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      padding: 9px;
+    }
+    .profile-insight-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 10px;
+    }
+    .profile-insight-card {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      padding: 10px;
+      display: grid;
+      gap: 9px;
+    }
+    .watching-layout {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+    .poster-thumb {
+      width: 88px;
+      height: 124px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-align: center;
+      padding: 6px;
+    }
+    .poster-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .progress-track {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }
+    .preview-shell {
+      margin-top: 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,0.35);
+      overflow: hidden;
+      min-height: 120px;
+      display: grid;
+      place-items: center;
+      position: relative;
+    }
+    .watch-preview {
+      width: 100%;
+      max-height: 190px;
+      display: block;
+      background: #000;
+    }
+    .preview-overlay {
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(0,0,0,0.52);
+      backdrop-filter: blur(2px);
+      padding: 6px 8px;
+      pointer-events: none;
+    }
+    .preview-overlay-label {
+      font-size: 0.7rem;
+      color: #d8dbe6;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .preview-overlay-track {
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.15);
+      overflow: hidden;
+    }
+    .preview-overlay-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #36df9f, #63b4ff);
+    }
+    .preview-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
       min-height: 22px;
-      font-size: 0.9rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
       color: var(--muted);
+      font-size: 0.73rem;
+      font-weight: 700;
+      padding: 0 9px;
     }
-    .status.error { color: #ff938c; }
-    .status.ok { color: var(--ok); }
+    .preview-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #6b7280;
+    }
+    .preview-status.connecting {
+      border-color: rgba(255,200,87,0.48);
+      color: #ffd98a;
+    }
+    .preview-status.connecting .preview-status-dot {
+      background: #f59e0b;
+      animation: previewBlink 1.2s ease-in-out infinite;
+    }
+    .preview-status.playing {
+      border-color: rgba(47,208,138,0.5);
+      color: #8be3bb;
+    }
+    .preview-status.playing .preview-status-dot {
+      background: #2fd08a;
+    }
+    .preview-status.failed,
+    .preview-status.blocked {
+      border-color: rgba(255,123,123,0.5);
+      color: #ffb2b2;
+    }
+    .preview-status.failed .preview-status-dot,
+    .preview-status.blocked .preview-status-dot {
+      background: #ff7b7b;
+    }
+    .preview-status.idle .preview-status-dot {
+      background: #6b7280;
+    }
+    @keyframes previewBlink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+    .insight-action-btn {
+      min-height: 32px;
+      border-radius: 9px;
+      padding: 0 10px;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+    .list-stack {
+      display: grid;
+      gap: 7px;
+      max-height: 180px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+    .list-item {
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      padding: 8px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      padding: 0 8px;
+      font-size: 0.72rem;
+      color: var(--muted);
+      background: rgba(255,255,255,0.04);
+      font-weight: 700;
+    }
+    .table-wrap { overflow: auto; border-radius: 12px; border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; min-width: 880px; }
+    th, td {
+      border-bottom: 1px solid rgba(255,255,255,0.09);
+      text-align: left;
+      padding: 8px;
+      font-size: 0.86rem;
+      vertical-align: top;
+    }
+    th { color: var(--muted); background: rgba(255,255,255,0.03); }
+
+    @media (max-width: 1120px) {
+      .app-layout { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+      .users-layout { grid-template-columns: 1fr; }
+      .users-list { max-height: none; }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="card">
-      <div class="row" style="justify-content: space-between;">
-        <div>
-          <h1>Painel Admin AS IPTV</h1>
-          <div class="muted">Gerencie usuarios, planos e ativacao diretamente no servidor.</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" id="loginCard">
-      <div class="row">
-        <input id="adminToken" placeholder="Token admin (ADMIN_TOKEN)" style="flex:1;min-width:260px" />
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <div class="shell">
+    <div id="loginCard" class="card login-card">
+      <h1 class="login-title">Painel Admin Completo</h1>
+      <div class="muted" style="margin-top:6px;">Dashboard, servidor, planos, usuarios/perfis, ativacoes e historico/logs em paginas separadas.</div>
+      <div class="row" style="margin-top:14px;">
+        <input id="adminToken" placeholder="Token admin (ADMIN_TOKEN)" style="flex:1; min-width:260px;" />
         <button id="loginBtn">Entrar</button>
       </div>
-      <div class="status" id="loginStatus"></div>
+      <div id="loginStatus" class="status"></div>
     </div>
 
-    <div class="card" id="actionsCard" style="display:none">
-      <div class="row">
-        <button id="refreshBtn" class="ghost">Atualizar usuarios</button>
-        <button id="logoutBtn" class="ghost">Sair</button>
-      </div>
-      <div class="status" id="actionStatus"></div>
-    </div>
+    <div id="appShell" class="app-layout hidden">
+      <aside class="sidebar">
+        <div class="brand">
+          <h2>AS Admin</h2>
+          <div class="muted small">Operacao centralizada</div>
+        </div>
+        <button class="route-btn active" data-route="dashboard">Home</button>
+        <button class="route-btn" data-route="server">Servidor</button>
+        <button class="route-btn" data-route="players">Players Ativos</button>
+        <button class="route-btn" data-route="plans">Planos</button>
+        <button class="route-btn" data-route="users">Usuarios e Perfis</button>
+        <button class="route-btn" data-route="activations">Ativacao e Recursos</button>
+        <button class="route-btn" data-route="logs">Historico e Logs</button>
+        <button class="route-btn" data-route="proxy">Proxy de Rede</button>
+        <button class="route-btn" data-route="ffmpeg">FFmpeg e Pipeline</button>
+      </aside>
 
-    <div id="usersGrid" class="grid"></div>
+      <main class="main">
+        <div class="main-top">
+          <div>
+            <h1 id="pageTitle">Home</h1>
+            <div class="muted small" id="generatedAt">Aguardando dados</div>
+          </div>
+          <div class="row">
+            <button id="refreshBtn" class="ghost">Atualizar tudo</button>
+            <button id="logoutBtn" class="ghost">Sair</button>
+          </div>
+        </div>
+
+        <section id="page-dashboard" class="page active">
+          <div class="card">
+            <h3 class="section-title">Indicadores de faturamento e operacao</h3>
+            <div id="dashboardKpis" class="grid kpi-grid" style="margin-top:10px;"></div>
+          </div>
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));">
+            <div class="card">
+              <h3 class="section-title">Planos ativos</h3>
+              <div id="planDistributionChart" class="chart-box" style="margin-top:10px;"></div>
+            </div>
+            <div class="card">
+              <h3 class="section-title">Faturamento futuro (30 dias)</h3>
+              <div id="futureRevenueChart" class="chart-box" style="margin-top:10px;"></div>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="section-title">Saude do servidor</h3>
+            <div id="dashboardServerHealth" class="sub-grid" style="margin-top:10px;"></div>
+          </div>
+        </section>
+
+        <section id="page-server" class="page">
+          <div class="card">
+            <h3 class="section-title">Desempenho do servidor</h3>
+            <div id="serverGlobalMetrics" class="sub-grid" style="margin-top:10px;"></div>
+          </div>
+          <div class="card">
+            <h3 class="section-title">Consumo por usuario (estimativa)</h3>
+            <div class="muted small" style="margin-top:6px;">Metrica baseada em perfis online, sessoes assistindo, historico de atividade e peso do backup.</div>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Perfis</th>
+                    <th>Online</th>
+                    <th>Assistindo</th>
+                    <th>CPU estimada</th>
+                    <th>Memoria estimada</th>
+                    <th>Score de carga</th>
+                  </tr>
+                </thead>
+                <tbody id="serverUsersBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-players" class="page">
+          <div class="card">
+            <div class="row" style="justify-content: space-between; align-items:center;">
+              <h3 class="section-title">Monitor em tempo real</h3>
+              <button id="refreshPlayersBtn" class="ghost">Atualizar players</button>
+            </div>
+            <div id="playersKpis" class="sub-grid" style="margin-top:10px;"></div>
+          </div>
+
+          <div class="card">
+            <h3 class="section-title">Consumo do servidor</h3>
+            <div id="playersServerMetrics" class="sub-grid" style="margin-top:10px;"></div>
+          </div>
+
+          <div class="card">
+            <h3 class="section-title">Players ativos agora</h3>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Perfil</th>
+                    <th>Conta</th>
+                    <th>Conteudo</th>
+                    <th>Tipo</th>
+                    <th>Progresso</th>
+                    <th>Tempo assistindo</th>
+                    <th>Ultimo heartbeat</th>
+                  </tr>
+                </thead>
+                <tbody id="playersActiveBody"></tbody>
+              </table>
+            </div>
+            <div id="playersStatus" class="status"></div>
+          </div>
+
+          <div class="card">
+            <h3 class="section-title">Pipelines HLS (fallback TS -> m3u8)</h3>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Pipeline</th>
+                    <th>Status</th>
+                    <th>Perfil HLS</th>
+                    <th>URL origem</th>
+                    <th>Iniciou em</th>
+                    <th>Ultimo uso</th>
+                    <th>Ultimo erro</th>
+                  </tr>
+                </thead>
+                <tbody id="playersPipelinesBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-plans" class="page">
+          <div class="card">
+            <div class="row" style="justify-content: space-between; align-items: center;">
+              <h3 class="section-title">Catalogo de planos</h3>
+              <button id="refreshPlansBtn" class="ghost">Recarregar planos</button>
+            </div>
+            <div id="plansGrid" class="grid" style="grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); margin-top:10px;"></div>
+            <div id="plansStatus" class="status"></div>
+          </div>
+          <div class="card">
+            <h3 class="section-title">Conteudo da tela assinar</h3>
+            <div class="muted small" style="margin-top:6px;">JSON editavel de chips, labels de recursos e ordem comparativa.</div>
+            <textarea id="subscriptionContentInput" style="margin-top:10px;"></textarea>
+            <div class="row" style="margin-top:10px;">
+              <button id="saveSubscriptionContentBtn">Salvar conteudo</button>
+            </div>
+            <div id="subscriptionContentStatus" class="status"></div>
+          </div>
+        </section>
+
+        <section id="page-users" class="page">
+          <div class="users-layout">
+            <div class="card">
+              <div class="row" style="justify-content: space-between; align-items:center;">
+                <h3 class="section-title">Usuarios</h3>
+                <button id="refreshUsersBtn" class="ghost">Atualizar</button>
+              </div>
+              <input id="usersSearchInput" placeholder="Buscar por nome, email, plano ou id" style="margin-top:10px;" />
+              <div id="usersList" class="users-list" style="margin-top:10px;"></div>
+              <div id="usersStatus" class="status"></div>
+            </div>
+
+            <div class="grid" id="userDetailArea">
+              <div class="card">
+                <h3 class="section-title">Selecione um usuario</h3>
+                <div class="muted small" style="margin-top:6px;">Abra os detalhes para editar perfis e ver contexto realtime.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-activations" class="page">
+          <div class="card">
+            <h3 class="section-title">Ativacao de planos por usuario</h3>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Plano</th>
+                    <th>Status</th>
+                    <th>Vencimento</th>
+                    <th>Valor</th>
+                    <th>Ativo</th>
+                    <th>Acoes</th>
+                  </tr>
+                </thead>
+                <tbody id="activationsBody"></tbody>
+              </table>
+            </div>
+            <div id="activationsStatus" class="status"></div>
+          </div>
+          <div class="card">
+            <h3 class="section-title">Matriz de recursos por plano</h3>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Plano</th>
+                    <th>Recursos</th>
+                    <th>Limite perfis</th>
+                    <th>Limite servidores</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="featuresMatrixBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-logs" class="page">
+          <div class="card">
+            <div class="row" style="justify-content: space-between; align-items:center;">
+              <h3 class="section-title">Historico e logs administrativos</h3>
+              <button id="refreshLogsBtn" class="ghost">Atualizar logs</button>
+            </div>
+            <input id="logsFilterInput" placeholder="Filtrar por evento ou texto do payload" style="margin-top:10px;" />
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Quando</th>
+                    <th>Evento</th>
+                    <th>Payload</th>
+                  </tr>
+                </thead>
+                <tbody id="logsBody"></tbody>
+              </table>
+            </div>
+            <div id="logsStatus" class="status"></div>
+          </div>
+        </section>
+
+        <section id="page-proxy" class="page">
+          <div class="card">
+            <div class="row" style="justify-content: space-between; align-items:center;">
+              <h3 class="section-title">Sessoes Proxy Ativas</h3>
+              <button id="refreshProxyBtn" class="ghost">Atualizar proxy</button>
+            </div>
+            <div class="muted small" style="margin-top:6px;">
+              Mostra perfis/usuarios que estao usando o proxy de rede para reproduzir conteudo e a URL alvo atual.
+            </div>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Session ID</th>
+                    <th>Usuario</th>
+                    <th>Perfil</th>
+                    <th>HLS</th>
+                    <th>URL</th>
+                    <th>Iniciou em</th>
+                    <th>Ultimo heartbeat</th>
+                    <th>Bytes proxied</th>
+                    <th>Acao</th>
+                  </tr>
+                </thead>
+                <tbody id="proxySessionsBody"></tbody>
+              </table>
+            </div>
+            <div id="proxyStatus" class="status"></div>
+          </div>
+        </section>
+
+        <section id="page-ffmpeg" class="page">
+          <div class="card">
+            <div class="row" style="justify-content: space-between; align-items:center;">
+              <h3 class="section-title">Configurações do servidor FFmpeg</h3>
+              <div class="row">
+                <button id="refreshFfmpegBtn" class="ghost">Atualizar</button>
+                <button id="saveFfmpegBtn">Salvar configuração</button>
+              </div>
+            </div>
+            <div class="muted small" style="margin-top:6px;">Ajustes de processamento, CPU, cache e rede para o pipeline HLS do servidor.</div>
+            <div id="ffmpegConfigMeta" class="muted small" style="margin-top:8px;"></div>
+            <div class="sub-grid" style="margin-top:10px;">
+              <div class="line-card"><div class="muted small">Pipeline habilitado</div><input id="ffm-enabled" type="checkbox" /></div>
+              <div class="line-card"><div class="muted small">Threads copy</div><input id="ffm-copyThreads" type="number" min="1" max="4" /></div>
+              <div class="line-card"><div class="muted small">Threads transcode</div><input id="ffm-transcodeThreads" type="number" min="1" max="16" /></div>
+              <div class="line-card"><div class="muted small">Preset</div><input id="ffm-preset" placeholder="ultrafast" /></div>
+              <div class="line-card"><div class="muted small">Tune</div><input id="ffm-tune" placeholder="zerolatency" /></div>
+              <div class="line-card"><div class="muted small">Video profile</div><input id="ffm-videoProfile" placeholder="baseline" /></div>
+              <div class="line-card"><div class="muted small">Video level</div><input id="ffm-videoLevel" placeholder="3.1" /></div>
+              <div class="line-card"><div class="muted small">Probe size</div><input id="ffm-probeSize" type="number" min="32000" max="64000000" /></div>
+              <div class="line-card"><div class="muted small">Analyze duration</div><input id="ffm-analyzeDuration" type="number" min="0" max="30000000" /></div>
+              <div class="line-card"><div class="muted small">multiple_requests</div><input id="ffm-multipleRequests" type="checkbox" /></div>
+              <div class="line-card"><div class="muted small">http_persistent</div><input id="ffm-httpPersistent" type="checkbox" /></div>
+              <div class="line-card"><div class="muted small">Low latency live (default)</div><input id="ffm-defaultLowLatencyLive" type="checkbox" /></div>
+              <div class="line-card"><div class="muted small">Reconnect agressivo (default)</div><input id="ffm-defaultAggressiveReconnect" type="checkbox" /></div>
+              <div class="line-card"><div class="muted small">Live hls_time (fast)</div><input id="ffm-liveHlsTimeFast" type="number" min="1" max="12" /></div>
+              <div class="line-card"><div class="muted small">Live list_size (fast)</div><input id="ffm-liveHlsListFast" type="number" min="3" max="20" /></div>
+              <div class="line-card"><div class="muted small">Live hls_time (safe)</div><input id="ffm-liveHlsTimeSafe" type="number" min="1" max="20" /></div>
+              <div class="line-card"><div class="muted small">Live list_size (safe)</div><input id="ffm-liveHlsListSafe" type="number" min="4" max="40" /></div>
+              <div class="line-card"><div class="muted small">VOD hls_time</div><input id="ffm-vodHlsTime" type="number" min="1" max="20" /></div>
+              <div class="line-card"><div class="muted small">VOD list_size</div><input id="ffm-vodHlsListSize" type="number" min="0" max="200000" /></div>
+              <div class="line-card"><div class="muted small">TTL cache pipeline (ms)</div><input id="ffm-pipelineTtlMs" type="number" min="30000" max="900000" /></div>
+            </div>
+            <div id="ffmpegConfigStatus" class="status"></div>
+          </div>
+
+          <div class="card">
+            <div class="row" style="justify-content: space-between; align-items:center;">
+              <h3 class="section-title">Logs de tráfego e pipeline</h3>
+              <div class="row">
+                <button id="refreshFfmpegLogsBtn" class="ghost">Atualizar logs</button>
+                <button id="clearFfmpegLogsBtn" class="warn">Limpar logs</button>
+              </div>
+            </div>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Quando</th>
+                    <th>Evento</th>
+                    <th>Detalhes</th>
+                  </tr>
+                </thead>
+                <tbody id="ffmpegLogsBody"></tbody>
+              </table>
+            </div>
+            <div id="ffmpegLogsStatus" class="status"></div>
+          </div>
+        </section>
+      </main>
+    </div>
   </div>
 
   <script>
-    const plans = ['free', 'plus', 'pro', 'ultra', 'lifetime'];
-    const usersGrid = document.getElementById('usersGrid');
+    const routeTitles = {
+      dashboard: 'Home',
+      server: 'Servidor',
+      players: 'Players Ativos',
+      plans: 'Planos',
+      users: 'Usuarios e Perfis',
+      activations: 'Ativacao e Recursos',
+      logs: 'Historico e Logs',
+      proxy: 'Proxy de Rede',
+      ffmpeg: 'FFmpeg e Pipeline',
+    };
+
     const loginCard = document.getElementById('loginCard');
-    const actionsCard = document.getElementById('actionsCard');
+    const appShell = document.getElementById('appShell');
     const loginStatus = document.getElementById('loginStatus');
-    const actionStatus = document.getElementById('actionStatus');
-    const adminTokenInput = document.getElementById('adminToken');
+    const pageTitle = document.getElementById('pageTitle');
+    const generatedAt = document.getElementById('generatedAt');
+
+    const dashboardKpis = document.getElementById('dashboardKpis');
+    const planDistributionChart = document.getElementById('planDistributionChart');
+    const futureRevenueChart = document.getElementById('futureRevenueChart');
+    const dashboardServerHealth = document.getElementById('dashboardServerHealth');
+
+    const serverGlobalMetrics = document.getElementById('serverGlobalMetrics');
+    const serverUsersBody = document.getElementById('serverUsersBody');
+
+    const playersKpis = document.getElementById('playersKpis');
+    const playersServerMetrics = document.getElementById('playersServerMetrics');
+    const playersActiveBody = document.getElementById('playersActiveBody');
+    const playersPipelinesBody = document.getElementById('playersPipelinesBody');
+    const playersStatus = document.getElementById('playersStatus');
+
+    const plansGrid = document.getElementById('plansGrid');
+    const plansStatus = document.getElementById('plansStatus');
+    const subscriptionContentInput = document.getElementById('subscriptionContentInput');
+    const subscriptionContentStatus = document.getElementById('subscriptionContentStatus');
+
+    const usersSearchInput = document.getElementById('usersSearchInput');
+    const usersList = document.getElementById('usersList');
+    const usersStatus = document.getElementById('usersStatus');
+    const userDetailArea = document.getElementById('userDetailArea');
+
+    const activationsBody = document.getElementById('activationsBody');
+    const activationsStatus = document.getElementById('activationsStatus');
+    const featuresMatrixBody = document.getElementById('featuresMatrixBody');
+
+    const logsFilterInput = document.getElementById('logsFilterInput');
+    const logsBody = document.getElementById('logsBody');
+    const logsStatus = document.getElementById('logsStatus');
+
+    const proxySessionsBody = document.getElementById('proxySessionsBody');
+    const proxyStatus = document.getElementById('proxyStatus');
+    const ffmpegConfigStatus = document.getElementById('ffmpegConfigStatus');
+    const ffmpegConfigMeta = document.getElementById('ffmpegConfigMeta');
+    const ffmpegLogsBody = document.getElementById('ffmpegLogsBody');
+    const ffmpegLogsStatus = document.getElementById('ffmpegLogsStatus');
 
     let token = localStorage.getItem('admin.jwt') || '';
+    let route = 'dashboard';
+    let users = [];
+    let selectedUserId = '';
+    let selectedUserDetails = null;
+    let selectedUserRealtimeFingerprint = '';
+    let plansCatalog = [];
+    let planFeatures = [];
+    let dashboardData = null;
+    let serverMetrics = null;
+    let playersMonitor = null;
+    let logsData = [];
+    let proxySessions = [];
+    let ffmpegConfig = null;
+    let ffmpegLogs = [];
+    let liveRefreshTimer = null;
+    const previewPlaybackStateCache = new Map();
 
     function setStatus(el, text, ok = true) {
       el.textContent = text || '';
       el.className = 'status ' + (text ? (ok ? 'ok' : 'error') : '');
     }
 
+    function escapeHtml(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    function fmtDate(value) {
+      if (!value) return '-';
+      try { return new Date(value).toLocaleString('pt-BR'); } catch { return String(value); }
+    }
+
+    function fmtMsTimestamp(value) {
+      const ms = Number(value || 0);
+      if (!Number.isFinite(ms) || ms <= 0) return '-';
+      try {
+        return new Date(ms).toLocaleString('pt-BR');
+      } catch {
+        return '-';
+      }
+    }
+
+    function fmtMoney(value) {
+      const num = Number(value || 0);
+      if (!Number.isFinite(num)) return 'R$ 0,00';
+      return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+
+    function fmtNumber(value) {
+      const num = Number(value || 0);
+      if (!Number.isFinite(num)) return '0';
+      return num.toLocaleString('pt-BR');
+    }
+
+    function toPct(value) {
+      const num = Math.max(0, Math.min(100, Number(value || 0)));
+      return `${Math.round(num)}%`;
+    }
+
+    function extractDecodedEntries(payload) {
+      return payload && payload.decodedEntries && typeof payload.decodedEntries === 'object'
+        ? payload.decodedEntries
+        : {};
+    }
+
+    function getProfileBackupDecoded(details, profileId) {
+      const globalDecoded = extractDecodedEntries(details?.backup || null);
+      const list = Array.isArray(details?.profileBackups) ? details.profileBackups : [];
+      const found = list.find((entry) => String(entry?.profileId || '') === String(profileId || ''));
+      const profileDecoded = extractDecodedEntries(found || null);
+      return {
+        ...globalDecoded,
+        ...profileDecoded,
+      };
+    }
+
+    function buildRealtimeFingerprint(details) {
+      const realtime = Array.isArray(details?.realtime) ? details.realtime : [];
+      const compact = realtime
+        .map((account) => {
+          const accountKey = String(account?.accountKey || '').trim();
+          const blocked = Array.isArray(account?.blocked)
+            ? account.blocked.map((item) => String(item || '').trim()).filter(Boolean).sort()
+            : [];
+
+          const profiles = (Array.isArray(account?.resolvedProfiles) ? account.resolvedProfiles : [])
+            .map((profile) => ({
+              id: String(profile?.profileId || '').trim(),
+              online: profile?.online === true,
+              contentId: String(profile?.watching?.contentId || '').trim(),
+              previewUrl: String(profile?.watching?.previewUrl || '').trim(),
+              posterUrl: String(profile?.watching?.posterUrl || '').trim(),
+              positionMs: Math.max(0, Number(profile?.watching?.positionMs || 0)),
+              durationMs: Math.max(0, Number(profile?.watching?.durationMs || 0)),
+              since: Math.max(0, Number(profile?.watching?.since || 0)),
+            }))
+            .sort((a, b) => a.id.localeCompare(b.id));
+
+          return {
+            accountKey,
+            blocked,
+            profiles,
+          };
+        })
+        .sort((a, b) => a.accountKey.localeCompare(b.accountKey));
+
+      return JSON.stringify(compact);
+    }
+
+    function normalizeProfilesForAdmin(details) {
+      const map = new Map();
+
+      const addProfile = (input) => {
+        const id = String(input?.id || input?.profileId || '').trim();
+        if (!id) return;
+        const prev = map.get(id) || {
+          id,
+          name: `Perfil ${id}`,
+          avatarUri: '',
+          pin: '',
+          enabled: true,
+          pinEnabled: false,
+          kidsMode: false,
+          isPrimary: false,
+        };
+
+        map.set(id, {
+          ...prev,
+          ...input,
+          id,
+          profileId: id,
+          name: String(input?.name || input?.profileName || prev.name || `Perfil ${id}`),
+          avatarUri: String(input?.avatarUri || prev.avatarUri || ''),
+          pin: String(input?.pin || prev.pin || ''),
+          enabled: typeof input?.enabled === 'boolean' ? input.enabled : prev.enabled !== false,
+          pinEnabled: input?.pinEnabled === true || prev.pinEnabled === true,
+          kidsMode: input?.kidsMode === true || prev.kidsMode === true,
+          isPrimary: input?.isPrimary === true || prev.isPrimary === true,
+        });
+      };
+
+      const fromSettings = Array.isArray(details?.settings?.profiles) ? details.settings.profiles : [];
+      for (const profile of fromSettings) addProfile(profile);
+
+      const fromBackup = details?.backup?.decodedEntries?.['accountSettings.v1']?.profiles;
+      if (Array.isArray(fromBackup)) {
+        for (const profile of fromBackup) addProfile(profile);
+      }
+
+      const profileBackups = Array.isArray(details?.profileBackups) ? details.profileBackups : [];
+      for (const entry of profileBackups) {
+        const backupProfiles = entry?.decodedEntries?.['accountSettings.v1']?.profiles;
+        if (Array.isArray(backupProfiles)) {
+          for (const profile of backupProfiles) addProfile(profile);
+        }
+        if (entry?.profileId) {
+          addProfile({ id: String(entry.profileId), name: `Perfil ${entry.profileId}` });
+        }
+      }
+
+      const realtimeAccounts = Array.isArray(details?.realtime) ? details.realtime : [];
+      for (const account of realtimeAccounts) {
+        const resolvedProfiles = Array.isArray(account?.resolvedProfiles) ? account.resolvedProfiles : [];
+        for (const profile of resolvedProfiles) {
+          addProfile({
+            id: profile.profileId,
+            profileId: profile.profileId,
+            profileName: profile.profileName,
+            avatarUri: profile.avatarUri,
+            enabled: profile.enabled,
+            pinEnabled: profile.pinEnabled,
+            kidsMode: profile.kidsMode,
+            isPrimary: profile.isPrimary,
+          });
+        }
+      }
+
+      return Array.from(map.values());
+    }
+
+    function getListsFromDecoded(decoded) {
+      const raw = decoded?.['user_lists_v2'] || decoded?.['user_lists_v1'] || null;
+      if (Array.isArray(raw)) return raw;
+      if (raw && Array.isArray(raw.lists)) return raw.lists;
+      return [];
+    }
+
+    function normalizeTextForSearch(value) {
+      return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+    }
+
+    function isLikelyImageUrl(url) {
+      const safe = String(url || '').trim();
+      if (!/^https?:\/\//i.test(safe)) return false;
+      if (/\.(m3u8|mp4|mkv|ts|mov|avi|webm)(\?|$)/i.test(safe)) return false;
+      return true;
+    }
+
+    function pickPosterFromObject(value) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+      const candidates = [
+        value.posterUrl,
+        value.poster_url,
+        value.poster,
+        value.coverUrl,
+        value.cover_url,
+        value.cover,
+        value.imageUrl,
+        value.image,
+        value.thumb,
+        value.thumbnail,
+        value.stream_icon,
+      ];
+      for (const candidate of candidates) {
+        if (isLikelyImageUrl(candidate)) return String(candidate).trim();
+      }
+      return '';
+    }
+
+    function isLikelyVideoUrl(url) {
+      const safe = String(url || '').trim();
+      if (!/^https?:\/\//i.test(safe)) return false;
+      if (/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|$)/i.test(safe)) return false;
+      if (/\.(json|txt|html|htm|css|js)(\?|$)/i.test(safe)) return false;
+      return true;
+    }
+
+    function pickPlaybackFromObject(value) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+      const candidates = [
+        value.playUrl,
+        value.sourceUrl,
+        value.streamUrl,
+        value.videoUrl,
+        value.watchUrl,
+        value.url,
+      ];
+      for (const candidate of candidates) {
+        if (isLikelyVideoUrl(candidate)) return String(candidate).trim();
+      }
+      return '';
+    }
+
+    function resolvePosterFromDecoded(decoded, contentId, contentTitle) {
+      const safeId = String(contentId || '').trim();
+      const safeTitle = normalizeTextForSearch(contentTitle || '');
+
+      const lists = getListsFromDecoded(decoded);
+      const fromLists = lists
+        .flatMap((list) => Array.isArray(list?.items) ? list.items : [])
+        .find((item) => {
+          const itemId = String(item?.contentId || '').trim();
+          const itemTitle = normalizeTextForSearch(item?.title || item?.name || '');
+          if (safeId && itemId && itemId === safeId) return true;
+          if (!safeId && safeTitle && itemTitle && (itemTitle.includes(safeTitle) || safeTitle.includes(itemTitle))) return true;
+          return false;
+        });
+      if (fromLists?.image) return String(fromLists.image);
+
+      const downloadsRaw = decoded?.downloaded_library_v1;
+      const downloadItems = Array.isArray(downloadsRaw?.items) ? downloadsRaw.items : (Array.isArray(downloadsRaw) ? downloadsRaw : []);
+      const fromDownloads = downloadItems.find((item) => {
+        const itemId = String(item?.contentId || '').trim();
+        const itemTitle = normalizeTextForSearch(item?.title || item?.name || '');
+        if (safeId && itemId && itemId === safeId) return true;
+        if (!safeId && safeTitle && itemTitle && (itemTitle.includes(safeTitle) || safeTitle.includes(itemTitle))) return true;
+        return false;
+      });
+      if (fromDownloads?.image) return String(fromDownloads.image);
+
+      const seen = new Set();
+      const stack = [decoded];
+      let visited = 0;
+      while (stack.length && visited < 4000) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object' || seen.has(node)) continue;
+        seen.add(node);
+        visited += 1;
+
+        if (!Array.isArray(node)) {
+          const nodeId = String(node.contentId || node.content_id || node.stream_id || node.vod_id || node.series_id || node.id || '').trim();
+          const nodeTitle = normalizeTextForSearch(node.title || node.name || node.contentTitle || node.movieTitle || node.seriesTitle || '');
+          const poster = pickPosterFromObject(node);
+          const idMatches = safeId && nodeId && nodeId === safeId;
+          const titleMatches = !safeId && safeTitle && nodeTitle && (nodeTitle.includes(safeTitle) || safeTitle.includes(nodeTitle));
+          if (poster && (idMatches || titleMatches)) {
+            return poster;
+          }
+        }
+
+        const values = Array.isArray(node) ? node : Object.values(node);
+        for (const value of values) {
+          if (value && typeof value === 'object') stack.push(value);
+        }
+      }
+
+      return '';
+    }
+
+    function resolvePreviewUrl(watching, decoded) {
+      const explicitPreview = String(watching?.previewUrl || '').trim();
+      if (isLikelyVideoUrl(explicitPreview)) return explicitPreview;
+
+      const safeId = String(watching?.contentId || '').trim();
+      if (!safeId) return '';
+
+      const seen = new Set();
+      const stack = [decoded];
+      let visited = 0;
+      while (stack.length && visited < 3500) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object' || seen.has(node)) continue;
+        seen.add(node);
+        visited += 1;
+
+        if (!Array.isArray(node)) {
+          const nodeId = String(node.contentId || node.content_id || node.stream_id || node.vod_id || node.series_id || node.id || '').trim();
+          if (nodeId && nodeId === safeId) {
+            const matchedUrl = pickPlaybackFromObject(node);
+            if (matchedUrl) return matchedUrl;
+          }
+        }
+
+        const values = Array.isArray(node) ? node : Object.values(node);
+        for (const value of values) {
+          if (value && typeof value === 'object') stack.push(value);
+        }
+      }
+
+      return '';
+    }
+
+    function buildPreviewFallbackCandidates(url) {
+      const safe = String(url || '').trim();
+      if (!safe) return [];
+
+      const list = [safe];
+      if (/\.ts(\?|$)/i.test(safe)) {
+        list.push(safe.replace(/\.ts(\?|$)/i, '.m3u8$1'));
+      } else if (/\.m3u8(\?|$)/i.test(safe)) {
+        list.push(safe.replace(/\.m3u8(\?|$)/i, '.ts$1'));
+      }
+
+      if (/output=ts/i.test(safe)) {
+        list.push(safe.replace(/output=ts/ig, 'output=m3u8'));
+      } else if (/output=m3u8/i.test(safe)) {
+        list.push(safe.replace(/output=m3u8/ig, 'output=ts'));
+      }
+
+      if (/\/live\//i.test(safe) && !/\.(m3u8|ts)(\?|$)/i.test(safe) && !/[?&]output=/i.test(safe)) {
+        const separator = safe.includes('?') ? '&' : '?';
+        list.push(`${safe}${separator}output=m3u8`);
+        list.push(`${safe}${separator}output=ts`);
+      }
+
+      return Array.from(new Set(list.filter(Boolean)));
+    }
+
+    function buildAdminPreviewSourceUrl(url, contentType) {
+      const safeUrl = String(url || '').trim();
+      const safeType = String(contentType || '').trim().toLowerCase();
+      if (!safeUrl) return '';
+      if (safeType !== 'live') return safeUrl;
+      return `/api/admin/live-proxy?url=${encodeURIComponent(safeUrl)}`;
+    }
+
+    function destroyPreviewHls(video) {
+      if (!video || !video._hlsInstance) return;
+      try {
+        video._hlsInstance.destroy();
+      } catch {
+        // ignora erro de cleanup
+      }
+      video._hlsInstance = null;
+    }
+
+    function setPreviewStatus(video, state, text) {
+      if (!video) return;
+      const statusEl = video.closest('.watching-layout')?.querySelector('.preview-status');
+      if (!statusEl) return;
+
+      const statusText = statusEl.querySelector('.preview-status-text');
+      statusEl.classList.remove('idle', 'connecting', 'playing', 'failed', 'blocked');
+      statusEl.classList.add(String(state || 'idle'));
+      if (statusText) {
+        statusText.textContent = String(text || 'Preview indisponivel');
+      } else {
+        statusEl.textContent = String(text || 'Preview indisponivel');
+      }
+    }
+
+    function getPreviewCacheKey(video) {
+      if (!video) return '';
+      const profileId = String(video.dataset.profileId || '').trim();
+      const contentId = String(video.dataset.contentId || '').trim();
+      if (!profileId || !contentId) return '';
+      return `${profileId}:${contentId}`;
+    }
+
+    function rememberPreviewState(video) {
+      if (!video) return;
+      const key = getPreviewCacheKey(video);
+      if (!key) return;
+      const timeSec = Math.max(0, Number(video.currentTime || 0));
+      if (!Number.isFinite(timeSec) || timeSec <= 0) return;
+      previewPlaybackStateCache.set(key, {
+        timeSec,
+        at: Date.now(),
+      });
+    }
+
+    function getDesiredPreviewTimeSec(video) {
+      if (!video) return 0;
+      const key = getPreviewCacheKey(video);
+      const cached = key ? previewPlaybackStateCache.get(key) : null;
+      const cachedTime = Math.max(0, Number(cached?.timeSec || 0));
+      const serverPos = Math.max(0, Number(video.dataset.previewPositionMs || 0)) / 1000;
+      return Math.max(cachedTime, serverPos);
+    }
+
+    function bindPreviewPlayer(video) {
+      if (!video) return;
+      const preferredUrl = String(video.dataset.previewUrl || video.getAttribute('src') || '').trim();
+      const candidates = buildPreviewFallbackCandidates(preferredUrl);
+      if (!candidates.length) {
+        setPreviewStatus(video, 'idle', 'Sem stream');
+        return;
+      }
+
+      let index = 0;
+      let retryTimer = null;
+      let seekApplied = false;
+      let hlsNetworkRecoveries = 0;
+      let hlsMediaRecoveries = 0;
+
+      video.muted = true;
+      video.defaultMuted = true;
+      video.autoplay = true;
+      video.playsInline = true;
+
+      const cleanupRetryTimer = () => {
+        if (!retryTimer) return;
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      };
+
+      const syncAndPlay = () => {
+        const desiredSec = getDesiredPreviewTimeSec(video);
+        if (!seekApplied && desiredSec > 0) {
+          const durationSec = Number(video.duration || 0);
+          if (Number.isFinite(durationSec) && durationSec > 0) {
+            const clamped = Math.max(0, Math.min(desiredSec, Math.max(0, durationSec - 1)));
+            if (Math.abs(Number(video.currentTime || 0) - clamped) > 1.2) {
+              try {
+                video.currentTime = clamped;
+              } catch {
+                // ignora erro de seek em streams sem metadados completos
+              }
+            }
+            seekApplied = true;
+          }
+        }
+
+        const playPromise = video.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => {
+            setPreviewStatus(video, 'connecting', 'Aguardando autoplay');
+          });
+        }
+      };
+
+      const tryNext = () => {
+        index += 1;
+        if (index >= candidates.length) {
+          cleanupRetryTimer();
+          setPreviewStatus(video, 'failed', 'Falha ao carregar preview');
+          return;
+        }
+        loadCurrent();
+      };
+
+      const onError = () => {
+        cleanupRetryTimer();
+        tryNext();
+      };
+
+      const loadCurrent = () => {
+        cleanupRetryTimer();
+        destroyPreviewHls(video);
+        hlsNetworkRecoveries = 0;
+        hlsMediaRecoveries = 0;
+        setPreviewStatus(video, 'connecting', `Conectando ${index + 1}/${candidates.length}`);
+
+        const url = candidates[index];
+        const requestUrl = buildAdminPreviewSourceUrl(url, video.dataset.contentType || '');
+        const isLikelyHls =
+          /\.m3u8(\?|$)/i.test(url) ||
+          /[?&]output=m3u8(\b|&|$)/i.test(url) ||
+          /\/live\//i.test(url);
+        const useHlsLib = isLikelyHls && window.Hls && window.Hls.isSupported && window.Hls.isSupported();
+
+        if (useHlsLib) {
+          try {
+            const hls = new window.Hls({
+              enableWorker: true,
+              lowLatencyMode: true,
+              liveDurationInfinity: true,
+              manifestLoadingTimeOut: 12000,
+              levelLoadingTimeOut: 12000,
+            });
+            video._hlsInstance = hls;
+            hls.loadSource(requestUrl);
+            hls.attachMedia(video);
+            hls.on(window.Hls.Events.ERROR, (_event, data) => {
+              if (!data?.fatal) return;
+
+              const fatalType = String(data.type || '');
+              if (fatalType === window.Hls.ErrorTypes.NETWORK_ERROR && hlsNetworkRecoveries < 2) {
+                hlsNetworkRecoveries += 1;
+                setPreviewStatus(video, 'connecting', `Reconectando live (${hlsNetworkRecoveries}/2)`);
+                try {
+                  hls.startLoad();
+                } catch {
+                  onError();
+                }
+                return;
+              }
+
+              if (fatalType === window.Hls.ErrorTypes.MEDIA_ERROR && hlsMediaRecoveries < 1) {
+                hlsMediaRecoveries += 1;
+                setPreviewStatus(video, 'connecting', 'Recuperando stream');
+                try {
+                  hls.recoverMediaError();
+                } catch {
+                  onError();
+                }
+                return;
+              }
+
+              onError();
+            });
+            hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+              setPreviewStatus(video, 'playing', 'Reproduzindo');
+              syncAndPlay();
+            });
+            retryTimer = setTimeout(() => {
+              onError();
+            }, 12000);
+            return;
+          } catch {
+            onError();
+            return;
+          }
+        }
+
+        video.src = requestUrl;
+        video.load();
+        retryTimer = setTimeout(() => {
+          onError();
+        }, 7000);
+      };
+
+      video.addEventListener('loadedmetadata', cleanupRetryTimer);
+      video.addEventListener('loadedmetadata', () => {
+        setPreviewStatus(video, 'playing', 'Buffer pronto');
+        syncAndPlay();
+      });
+      video.addEventListener('canplay', () => {
+        syncAndPlay();
+      });
+      video.addEventListener('playing', () => {
+        cleanupRetryTimer();
+        setPreviewStatus(video, 'playing', 'Reproduzindo');
+        rememberPreviewState(video);
+      });
+      video.addEventListener('timeupdate', () => {
+        rememberPreviewState(video);
+      });
+      video.addEventListener('error', onError);
+      loadCurrent();
+    }
+
+    function initPreviewPlayers(scopeEl) {
+      if (!scopeEl) return;
+      const previews = scopeEl.querySelectorAll('video.watch-preview[data-preview-url]');
+      for (const video of previews) {
+        bindPreviewPlayer(video);
+      }
+    }
+
+    function capturePreviewStates(scopeEl) {
+      if (!scopeEl) return;
+      const previews = scopeEl.querySelectorAll('video.watch-preview[data-preview-url]');
+      for (const video of previews) {
+        rememberPreviewState(video);
+      }
+    }
+
+    function updateProfileCardBlockUi(scopeEl, contentId, isBlocked) {
+      const safeContentId = String(contentId || '').trim();
+      if (!scopeEl || !safeContentId) return;
+
+      const relatedButtons = scopeEl.querySelectorAll(`button.insight-action-btn[data-content-id="${safeContentId.replaceAll('"', '\\"')}"]`);
+      for (const btn of relatedButtons) {
+        btn.dataset.action = isBlocked ? 'unblock-current' : 'block-current';
+        btn.textContent = isBlocked ? 'Desbloquear conteudo atual' : 'Bloquear conteudo atual';
+        btn.classList.toggle('warn', isBlocked);
+        btn.classList.toggle('danger', !isBlocked);
+
+        const card = btn.closest('.profile-insight-card');
+        if (!card) continue;
+        if (isBlocked) {
+          const statusEl = card.querySelector('.preview-status');
+          if (statusEl) {
+            statusEl.classList.remove('idle', 'connecting', 'playing', 'failed');
+            statusEl.classList.add('blocked');
+            const statusText = statusEl.querySelector('.preview-status-text');
+            if (statusText) statusText.textContent = 'Bloqueado agora';
+          }
+          for (const video of card.querySelectorAll('video.watch-preview')) {
+            try {
+              video.pause();
+            } catch {
+              // ignora falha de pausa
+            }
+          }
+        }
+      }
+    }
+
+    function getMovieProgressByContent(decoded, contentId) {
+      const map = decoded?.movieProgressMap && typeof decoded.movieProgressMap === 'object' ? decoded.movieProgressMap : {};
+      return map?.[String(contentId || '')] || null;
+    }
+
+    function getSeriesProgressByContent(decoded, contentId) {
+      const map = decoded?.seriesProgressMap && typeof decoded.seriesProgressMap === 'object' ? decoded.seriesProgressMap : {};
+      return map?.[String(contentId || '')] || null;
+    }
+
+    function getCurrentWatchingProgress(decoded, watching) {
+      if (!watching) {
+        return { percent: 0, label: 'Sem reproducao em andamento' };
+      }
+
+      const realtimePosMs = Math.max(0, Number(watching?.positionMs || 0));
+      const realtimeDurMs = Math.max(0, Number(watching?.durationMs || 0));
+      if (realtimePosMs > 0 || realtimeDurMs > 0) {
+        const percent = realtimeDurMs > 0 ? (realtimePosMs / realtimeDurMs) * 100 : 0;
+        const posMin = Math.round(realtimePosMs / 60000);
+        const durMin = Math.round(realtimeDurMs / 60000);
+        return {
+          percent: Math.max(0, Math.min(100, Number(percent || 0))),
+          label: realtimeDurMs > 0 ? `${posMin}m / ${durMin}m (realtime)` : `${posMin}m (realtime)`,
+        };
+      }
+
+      const contentId = String(watching.contentId || '');
+      const type = String(watching.contentType || 'movie').toLowerCase();
+
+      if (type === 'series') {
+        const progress = getSeriesProgressByContent(decoded, contentId);
+        const episodes = progress?.episodes && typeof progress.episodes === 'object' ? Object.values(progress.episodes) : [];
+        const avg = episodes.length
+          ? Math.round(episodes.reduce((sum, item) => sum + Number(item?.progress || 0), 0) / episodes.length)
+          : Number(progress?.progressPercent || 0);
+        return {
+          percent: Math.max(0, Math.min(100, Number(avg || 0))),
+          label: progress
+            ? `S${Number(progress.lastSeason || 1)}E${Number(progress.lastEpisode || 1)}`
+            : 'Sem progresso salvo',
+        };
+      }
+
+      const movie = getMovieProgressByContent(decoded, contentId);
+      const percent = Number(movie?.progressPercent || 0);
+      const posMin = Math.round(Number(movie?.positionMs || 0) / 60000);
+      const durMin = Math.round(Number(movie?.durationMs || 0) / 60000);
+      return {
+        percent: Math.max(0, Math.min(100, percent)),
+        label: movie ? `${posMin}m / ${durMin}m` : 'Sem progresso salvo',
+      };
+    }
+
+    function getContinueWatchingFromDecoded(decoded) {
+      const movies = decoded?.movieProgressMap && typeof decoded.movieProgressMap === 'object'
+        ? Object.entries(decoded.movieProgressMap).map(([contentId, item]) => ({
+            contentId,
+            title: String(item?.title || `Filme ${contentId}`),
+            type: 'movie',
+            progress: Number(item?.progressPercent || 0),
+            updatedAt: String(item?.updatedAt || item?.updated_at || ''),
+          }))
+        : [];
+
+      const series = decoded?.seriesProgressMap && typeof decoded.seriesProgressMap === 'object'
+        ? Object.entries(decoded.seriesProgressMap).map(([contentId, item]) => ({
+            contentId,
+            title: String(item?.title || `Serie ${contentId}`),
+            type: 'series',
+            progress: Number(item?.progressPercent || 0),
+            updatedAt: String(item?.updatedAt || item?.updated_at || ''),
+          }))
+        : [];
+
+      return [...movies, ...series]
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+        .slice(0, 12);
+    }
+
+    function getProfileRuntimeContext(details, profileId) {
+      const accounts = Array.isArray(details?.realtime) ? details.realtime : [];
+      for (const account of accounts) {
+        const profile = (account.resolvedProfiles || []).find((item) => String(item?.profileId || '') === String(profileId || ''));
+        if (!profile) continue;
+        const activity = (account.activity || []).find((item) => String(item?.profileId || '') === String(profileId || '')) || null;
+        return {
+          account,
+          profile,
+          activity,
+        };
+      }
+      return { account: null, profile: null, activity: null };
+    }
+
     async function api(path, opts = {}) {
-      const res = await fetch(path, {
+      const response = await fetch(path, {
         ...opts,
         headers: {
           'Content-Type': 'application/json',
@@ -157,135 +1631,1126 @@
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `Erro ${res.status}`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || `Erro ${response.status}`);
+      }
       return body;
     }
 
-    function userCard(user) {
-      const wrap = document.createElement('div');
-      wrap.className = 'user-card';
-
-      const statusPill = user.plan.enabled ? '<span class="pill ok">Ativo</span>' : '<span class="pill off">Desativado</span>';
-      const backupPill = user.sync.hasBackup ? '<span class="pill ok">Backup: sim</span>' : '<span class="pill">Backup: nao</span>';
-
-      wrap.innerHTML = `
-        <div style="font-weight:700;font-size:1rem">${user.name || 'Sem nome'}</div>
-        <div class="muted" style="margin-bottom:8px">${user.email}</div>
-        <div style="margin-bottom:8px">${statusPill}${backupPill}</div>
-        <div class="muted">Plano atual: <strong style="color:#f7f9ff">${user.plan.planId}</strong></div>
-        <div class="muted">Status: ${user.plan.status}</div>
-        <div class="muted">Ultimo login: ${user.lastLoginAt || '-'}</div>
-        <div class="muted">Ultimo sync: ${user.sync.lastSyncAt || '-'}</div>
-        <div class="row" style="margin-top:10px">
-          <select class="plan-select" style="flex:1;min-width:120px">
-            ${plans.map((p) => `<option value="${p}" ${p===user.plan.planId?'selected':''}>${p}</option>`).join('')}
-          </select>
-          <select class="status-select" style="flex:1;min-width:120px">
-            <option value="active" ${user.plan.status==='active'?'selected':''}>active</option>
-            <option value="grace" ${user.plan.status==='grace'?'selected':''}>grace</option>
-            <option value="expired" ${user.plan.status==='expired'?'selected':''}>expired</option>
-            <option value="unknown" ${user.plan.status==='unknown'?'selected':''}>unknown</option>
-          </select>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button class="save-btn" style="flex:1">Salvar plano</button>
-          <button class="toggle-btn ghost" style="flex:1">${user.plan.enabled ? 'Desativar' : 'Ativar'}</button>
-        </div>
-        <div class="status"></div>
-      `;
-
-      const saveBtn = wrap.querySelector('.save-btn');
-      const toggleBtn = wrap.querySelector('.toggle-btn');
-      const planSelect = wrap.querySelector('.plan-select');
-      const statusSelect = wrap.querySelector('.status-select');
-      const localStatus = wrap.querySelector('.status');
-
-      saveBtn.addEventListener('click', async () => {
-        try {
-          setStatus(localStatus, 'Salvando...', true);
-          await api(`/api/admin/users/${user.id}/plan`, {
-            method: 'PATCH',
-            body: JSON.stringify({
-              planId: planSelect.value,
-              status: statusSelect.value,
-              enabled: user.plan.enabled,
-            }),
-          });
-          setStatus(localStatus, 'Plano atualizado', true);
-          await loadUsers();
-        } catch (err) {
-          setStatus(localStatus, err.message, false);
-        }
-      });
-
-      toggleBtn.addEventListener('click', async () => {
-        try {
-          setStatus(localStatus, 'Atualizando ativacao...', true);
-          await api(`/api/admin/users/${user.id}/active`, {
-            method: 'PATCH',
-            body: JSON.stringify({ active: !user.plan.enabled }),
-          });
-          setStatus(localStatus, 'Ativacao atualizada', true);
-          await loadUsers();
-        } catch (err) {
-          setStatus(localStatus, err.message, false);
-        }
-      });
-
-      return wrap;
+    function setRoute(nextRoute) {
+      route = nextRoute;
+      for (const btn of document.querySelectorAll('.route-btn')) {
+        btn.classList.toggle('active', btn.dataset.route === route);
+      }
+      for (const page of document.querySelectorAll('.page')) {
+        page.classList.toggle('active', page.id === `page-${route}`);
+      }
+      pageTitle.textContent = routeTitles[route] || 'Admin';
+      if (route === 'plans') {
+        loadSubscriptionContentConfig(true).catch(() => {});
+      }
+      if (route === 'logs') {
+        renderLogs();
+      }
+      if (route === 'proxy') {
+        loadProxySessions(false).catch(() => {});
+      }
+      if (route === 'players') {
+        loadPlayersMonitor(false).catch(() => {});
+      }
+      if (route === 'ffmpeg') {
+        loadFfmpegConfig(false).catch(() => {});
+        loadFfmpegLogs(false).catch(() => {});
+      }
     }
 
-    async function loadUsers() {
-      try {
-        setStatus(actionStatus, 'Carregando usuarios...', true);
-        const body = await api('/api/admin/users');
-        usersGrid.innerHTML = '';
-        for (const user of body.users || []) {
-          usersGrid.appendChild(userCard(user));
-        }
-        setStatus(actionStatus, `${(body.users || []).length} usuario(s) carregado(s).`, true);
-      } catch (err) {
-        setStatus(actionStatus, err.message, false);
+    function formatDurationMin(minValue) {
+      const min = Math.max(0, Number(minValue || 0));
+      if (min < 60) return `${Math.round(min)} min`;
+      const h = Math.floor(min / 60);
+      const m = Math.round(min % 60);
+      return `${h}h ${m}m`;
+    }
+
+    function renderPlayersMonitor() {
+      if (!playersMonitor) return;
+
+      const summary = playersMonitor.summary || {};
+      const server = playersMonitor.server || {};
+      const memoryMb = server.memoryMb || {};
+      const activePlayers = Array.isArray(playersMonitor.activePlayers) ? playersMonitor.activePlayers : [];
+      const hlsPipelines = Array.isArray(playersMonitor.hlsPipelines) ? playersMonitor.hlsPipelines : [];
+
+      playersKpis.innerHTML = [
+        ['Players ativos', fmtNumber(summary.activePlayers || 0)],
+        ['Lives ativas', fmtNumber(summary.activeLivePlayers || 0)],
+        ['Filmes ativos', fmtNumber(summary.activeMoviePlayers || 0)],
+        ['Series ativas', fmtNumber(summary.activeSeriesPlayers || 0)],
+        ['Sessoes proxy', fmtNumber(summary.proxySessions || 0)],
+        ['Pipelines HLS', `${fmtNumber(summary.runningHlsPipelines || 0)} / ${fmtNumber(summary.hlsPipelines || 0)}`],
+        ['Trafego proxy', `${fmtNumber(summary.proxiedTrafficMb || 0)} MB`],
+      ].map(([k, v]) => `<div class="line-card"><div class="muted small">${escapeHtml(k)}</div><div style="font-weight:900; margin-top:4px;">${escapeHtml(v)}</div></div>`).join('');
+
+      playersServerMetrics.innerHTML = [
+        ['Uptime', `${fmtNumber(server.uptimeSec || 0)} s`],
+        ['PID', String(server.pid || '-')],
+        ['Node', String(server.nodeVersion || '-')],
+        ['Plataforma', String(server.platform || '-')],
+        ['CPU user', `${fmtNumber(server.cpuUserMs || 0)} ms`],
+        ['CPU system', `${fmtNumber(server.cpuSystemMs || 0)} ms`],
+        ['Event loop lag', `${fmtNumber(server.eventLoopLagMs || 0)} ms`],
+        ['RSS', `${fmtNumber(memoryMb.rss || 0)} MB`],
+        ['Heap usado', `${fmtNumber(memoryMb.heapUsed || 0)} MB`],
+      ].map(([k, v]) => `<div class="line-card"><div class="muted small">${escapeHtml(k)}</div><div style="font-weight:800; margin-top:4px;">${escapeHtml(v)}</div></div>`).join('');
+
+      playersActiveBody.innerHTML = activePlayers.map((item) => {
+        const pos = Math.max(0, Number(item.positionMs || 0));
+        const dur = Math.max(0, Number(item.durationMs || 0));
+        const pct = dur > 0 ? Math.max(0, Math.min(100, Math.round((pos / dur) * 100))) : 0;
+        return `
+          <tr>
+            <td><div style="font-weight:800;">${escapeHtml(item.profileName || item.profileId || '-')}</div><div class="muted small">${escapeHtml(item.profileId || '-')}</div></td>
+            <td><div class="muted small">${escapeHtml(item.accountKey || '-')}</div></td>
+            <td><div style="font-weight:700;">${escapeHtml(item.contentTitle || '-')}</div><div class="muted small">${escapeHtml(item.contentId || '-')}</div></td>
+            <td>${escapeHtml(item.contentType || '-')}</td>
+            <td>${escapeHtml(`${pct}%`)}</td>
+            <td>${escapeHtml(formatDurationMin(item.watchingDurationMin || 0))}</td>
+            <td>${escapeHtml(fmtMsTimestamp(item.lastSeen || 0))}</td>
+          </tr>
+        `;
+      }).join('') || '<tr><td colspan="7" class="muted small">Nenhum player ativo no momento.</td></tr>';
+
+      playersPipelinesBody.innerHTML = hlsPipelines.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.id || '-')}</td>
+          <td>${item.running ? '<span class="pill ok">rodando</span>' : '<span class="pill danger">parado</span>'}</td>
+          <td>
+            <div class="small">${escapeHtml(String(item.contentType || 'live'))} • ${escapeHtml(String(item.quality || 'auto'))}</div>
+            <div class="muted small">LL: ${item.lowLatencyLive === false ? 'off' : 'on'} • RC: ${item.aggressiveReconnect === false ? 'off' : 'on'}</div>
+          </td>
+          <td title="${escapeHtml(item.targetUrl || '-')}">${escapeHtml(item.targetUrl || '-')}</td>
+          <td>${escapeHtml(fmtMsTimestamp(item.startedAt || 0))}</td>
+          <td>${escapeHtml(fmtMsTimestamp(item.lastSeenAt || 0))}</td>
+          <td><div class="muted small">${escapeHtml(item.lastError || '-')}</div></td>
+        </tr>
+      `).join('') || '<tr><td colspan="7" class="muted small">Nenhum pipeline HLS ativo.</td></tr>';
+    }
+
+    function renderDashboard() {
+      if (!dashboardData) return;
+      const financial = dashboardData.financial || {};
+      const overview = dashboardData.overview || {};
+      dashboardKpis.innerHTML = [
+        ['Faturamento atual', fmtMoney(financial.activeRevenue || 0)],
+        ['Planos ativos', fmtNumber(overview.activePlansCount || 0)],
+        ['Faturamento futuro 30d', fmtMoney(financial.forecastRevenue30d || 0)],
+        ['Usuarios ativos', fmtNumber(financial.activeUsersCount || 0)],
+      ].map(([label, value]) => `
+        <div class="kpi-card">
+          <div class="kpi-label">${escapeHtml(label)}</div>
+          <div class="kpi-value">${escapeHtml(value)}</div>
+        </div>
+      `).join('');
+
+      const dist = financial.plansDistribution || {};
+      const maxDist = Math.max(1, ...Object.values(dist).map((item) => Number(item || 0)));
+      planDistributionChart.innerHTML = Object.entries(dist)
+        .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+        .map(([planId, total]) => {
+          const pct = (Number(total || 0) / maxDist) * 100;
+          return `
+            <div class="bar-row">
+              <div>${escapeHtml(planId)}</div>
+              <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;"></div></div>
+              <div>${escapeHtml(String(total || 0))}</div>
+            </div>
+          `;
+        })
+        .join('') || '<div class="muted small">Sem dados de planos.</div>';
+
+      const dueSoon = Array.isArray(financial.dueSoon) ? financial.dueSoon : [];
+      const maxDue = Math.max(1, ...dueSoon.map((item) => Number(item.amount || 0)));
+      futureRevenueChart.innerHTML = dueSoon.slice(0, 12).map((item) => {
+        const pct = (Number(item.amount || 0) / maxDue) * 100;
+        return `
+          <div class="bar-row">
+            <div>${escapeHtml(item.userName || item.userId || '-')}</div>
+            <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;"></div></div>
+            <div>${escapeHtml(fmtMoney(item.amount || 0))}</div>
+          </div>
+        `;
+      }).join('') || '<div class="muted small">Nenhum vencimento para os proximos 30 dias.</div>';
+
+      const health = dashboardData.health || {};
+      const metrics = health.metrics || {};
+      dashboardServerHealth.innerHTML = [
+        ['Status', health.status || '-'],
+        ['Perfis online', fmtNumber(metrics.onlineProfiles || 0)],
+        ['Perfis totais', fmtNumber(metrics.totalProfiles || 0)],
+        ['RSS memoria', `${fmtNumber(metrics.rssMb || 0)} MB`],
+        ['Event loop lag', `${fmtNumber(metrics.eventLoopLagMs || 0)} ms`],
+      ].map(([k, v]) => `<div class="line-card"><div class="muted small">${escapeHtml(k)}</div><div style="font-weight:800;margin-top:4px;">${escapeHtml(v)}</div></div>`).join('');
+    }
+
+    function renderServerMetrics() {
+      if (!serverMetrics) return;
+      const server = serverMetrics.server || {};
+      serverGlobalMetrics.innerHTML = [
+        ['Uptime', `${fmtNumber(server.uptimeSec || 0)} s`],
+        ['Load avg 1m', String(server.loadAvg1m ?? '-')],
+        ['CPU user', `${fmtNumber(server.cpuUserMs || 0)} ms`],
+        ['CPU system', `${fmtNumber(server.cpuSystemMs || 0)} ms`],
+        ['Lag event loop', `${fmtNumber(server.eventLoopLagMs || 0)} ms`],
+        ['RSS', `${fmtNumber(server.memoryMb?.rss || 0)} MB`],
+        ['Heap usado', `${fmtNumber(server.memoryMb?.heapUsed || 0)} MB`],
+        ['CPU estimada', toPct(server.estimatedCpuPercent || 0)],
+        ['Memoria estimada', `${fmtNumber(server.estimatedMemoryMb || 0)} MB`],
+      ].map(([label, value]) => `<div class="line-card"><div class="muted small">${escapeHtml(label)}</div><div style="font-weight:800;margin-top:4px;">${escapeHtml(value)}</div></div>`).join('');
+
+      const rows = Array.isArray(serverMetrics.topUsers) ? serverMetrics.topUsers : [];
+      serverUsersBody.innerHTML = rows.map((item) => `
+        <tr>
+          <td><div style="font-weight:800">${escapeHtml(item.userName || item.userId)}</div><div class="muted small">${escapeHtml(item.userEmail || '')}</div></td>
+          <td>${escapeHtml(String(item.totalProfiles || 0))}</td>
+          <td>${escapeHtml(String(item.onlineProfiles || 0))}</td>
+          <td>${escapeHtml(String(item.watchingNowCount || 0))}</td>
+          <td>${escapeHtml(toPct(item.cpuEstimatePercent || 0))}</td>
+          <td>${escapeHtml(`${fmtNumber(item.memoryEstimateMb || 0)} MB`)}</td>
+          <td>${escapeHtml(String(item.loadScore || 0))}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="7" class="muted small">Sem usuarios para mostrar.</td></tr>';
+    }
+
+    function sanitizeFeaturesInput(value) {
+      return Array.from(new Set(String(value || '').split(',').map((item) => item.trim()).filter((item) => planFeatures.includes(item))));
+    }
+
+    function renderPlans() {
+      plansGrid.innerHTML = '';
+      if (!plansCatalog.length) {
+        plansGrid.innerHTML = '<div class="muted small">Nenhum plano no catalogo.</div>';
+        return;
       }
+
+      for (const plan of plansCatalog) {
+        const card = document.createElement('div');
+        card.className = 'line-card';
+        card.innerHTML = `
+          <div class="row" style="justify-content: space-between; align-items:flex-start;">
+            <div>
+              <div style="font-weight:900;">${escapeHtml(plan.name || plan.id)}</div>
+              <div class="muted small">id ${escapeHtml(plan.id || '-')} • atualizado ${escapeHtml(fmtDate(plan.updatedAt))}</div>
+            </div>
+            <div class="row">
+              <span class="pill ${plan.enabled ? 'ok' : 'danger'}">${plan.enabled ? 'ativo' : 'inativo'}</span>
+              ${plan.highlighted ? '<span class="pill warn">destaque</span>' : ''}
+            </div>
+          </div>
+          <div class="sub-grid" style="margin-top:8px;">
+            <input class="p-name" value="${escapeHtml(plan.name || '')}" placeholder="Nome" />
+            <input class="p-tagline" value="${escapeHtml(plan.tagline || '')}" placeholder="Tagline" />
+            <input class="p-price" value="${escapeHtml(plan.price || '')}" placeholder="Preco" />
+            <input class="p-price-note" value="${escapeHtml(plan.priceNote || '')}" placeholder="Obs preco" />
+            <input class="p-color" value="${escapeHtml(plan.color || '#7F89A8')}" placeholder="#RRGGBB" />
+            <input class="p-max-profiles" value="${escapeHtml(String(plan.maxProfiles ?? 1))}" placeholder="Max perfis" />
+            <input class="p-max-servers" value="${escapeHtml(String(plan.maxServers ?? 1))}" placeholder="Max servidores" />
+            <input class="p-sort" value="${escapeHtml(String(plan.sortOrder ?? 0))}" placeholder="Ordem" />
+          </div>
+          <input class="p-features" value="${escapeHtml((plan.features || []).join(', '))}" placeholder="${escapeHtml(planFeatures.join(', '))}" style="margin-top:8px;" />
+          <div class="row" style="margin-top:8px;">
+            <label class="small muted"><input type="checkbox" class="p-enabled" ${plan.enabled ? 'checked' : ''} /> Ativo</label>
+            <label class="small muted"><input type="checkbox" class="p-highlighted" ${plan.highlighted ? 'checked' : ''} /> Destaque</label>
+            <button class="save-plan">Salvar</button>
+          </div>
+          <div class="status"></div>
+        `;
+
+        const localStatus = card.querySelector('.status');
+        card.querySelector('.save-plan').addEventListener('click', async () => {
+          try {
+            setStatus(localStatus, 'Salvando plano...', true);
+            await api(`/api/admin/plans/${encodeURIComponent(plan.id)}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                name: card.querySelector('.p-name').value.trim(),
+                tagline: card.querySelector('.p-tagline').value.trim(),
+                price: card.querySelector('.p-price').value.trim(),
+                priceNote: card.querySelector('.p-price-note').value.trim(),
+                color: card.querySelector('.p-color').value.trim(),
+                maxProfiles: Number(card.querySelector('.p-max-profiles').value || 1),
+                maxServers: Number(card.querySelector('.p-max-servers').value || 1),
+                sortOrder: Number(card.querySelector('.p-sort').value || 0),
+                features: sanitizeFeaturesInput(card.querySelector('.p-features').value),
+                enabled: card.querySelector('.p-enabled').checked,
+                highlighted: card.querySelector('.p-highlighted').checked,
+              }),
+            });
+            setStatus(localStatus, 'Plano atualizado com sucesso.', true);
+            await loadPlansCatalog(true);
+            renderActivationsPage();
+          } catch (error) {
+            setStatus(localStatus, error.message, false);
+          }
+        });
+
+        plansGrid.appendChild(card);
+      }
+    }
+
+    async function loadPlansCatalog(silent = false) {
+      try {
+        if (!silent) setStatus(plansStatus, 'Carregando catalogo...', true);
+        const body = await api('/api/admin/plans');
+        plansCatalog = Array.isArray(body.plans) ? body.plans : [];
+        planFeatures = Array.isArray(body.features) ? body.features : [];
+        renderPlans();
+        if (!silent) setStatus(plansStatus, `${plansCatalog.length} plano(s) carregado(s).`, true);
+      } catch (error) {
+        setStatus(plansStatus, error.message, false);
+      }
+    }
+
+    async function loadSubscriptionContentConfig(silent = false) {
+      try {
+        if (!silent) setStatus(subscriptionContentStatus, 'Carregando conteudo...', true);
+        const body = await api('/api/admin/subscription/content');
+        subscriptionContentInput.value = JSON.stringify(body.content || {}, null, 2);
+        if (!silent) setStatus(subscriptionContentStatus, 'Conteudo carregado.', true);
+      } catch (error) {
+        setStatus(subscriptionContentStatus, error.message, false);
+      }
+    }
+
+    async function saveSubscriptionContentConfig() {
+      try {
+        setStatus(subscriptionContentStatus, 'Salvando conteudo...', true);
+        let parsed;
+        try {
+          parsed = JSON.parse(String(subscriptionContentInput.value || '{}'));
+        } catch {
+          throw new Error('JSON invalido no conteudo.');
+        }
+        await api('/api/admin/subscription/content', {
+          method: 'PUT',
+          body: JSON.stringify(parsed),
+        });
+        setStatus(subscriptionContentStatus, 'Conteudo salvo.', true);
+      } catch (error) {
+        setStatus(subscriptionContentStatus, error.message, false);
+      }
+    }
+
+    function userMatchesQuery(user, query) {
+      if (!query) return true;
+      const text = [user.name, user.email, user.id, user.plan?.planId, user.plan?.status].join(' ').toLowerCase();
+      return text.includes(query);
+    }
+
+    function renderUsersList() {
+      const query = String(usersSearchInput.value || '').trim().toLowerCase();
+      const filtered = users.filter((item) => userMatchesQuery(item, query));
+      usersList.innerHTML = filtered.map((user) => `
+        <div class="user-item ${selectedUserId === user.id ? 'active' : ''}" data-user-id="${escapeHtml(user.id)}">
+          <h4>${escapeHtml(user.name || 'Sem nome')}</h4>
+          <div class="muted small">${escapeHtml(user.email || '')}</div>
+          <div class="row" style="margin-top:6px;">
+            <span class="pill">${escapeHtml(user.plan?.planId || 'free')}</span>
+            <span class="pill ${user.plan?.enabled ? 'ok' : 'danger'}">${user.plan?.enabled ? 'ativo' : 'inativo'}</span>
+          </div>
+          <div class="muted small" style="margin-top:6px;">Sync ${escapeHtml(user.sync?.hasBackup ? 'com backup' : 'sem backup')}</div>
+        </div>
+      `).join('') || '<div class="muted small">Nenhum usuario encontrado.</div>';
+
+      for (const el of usersList.querySelectorAll('.user-item')) {
+        el.addEventListener('click', () => selectUser(el.dataset.userId));
+      }
+    }
+
+    function renderUserDetails() {
+      if (!selectedUserDetails) {
+        userDetailArea.innerHTML = '<div class="card"><h3 class="section-title">Selecione um usuario</h3></div>';
+        return;
+      }
+
+      const details = selectedUserDetails;
+      const profiles = normalizeProfilesForAdmin(details);
+      const realtimeAccounts = Array.isArray(details.realtime) ? details.realtime : [];
+
+      userDetailArea.innerHTML = `
+        <div class="card">
+          <div class="row" style="justify-content: space-between; align-items:flex-start;">
+            <div>
+              <h3 class="section-title">${escapeHtml(details.user?.name || details.user?.id || '-')}</h3>
+              <div class="muted small">${escapeHtml(details.user?.email || '')} • ultimo login ${escapeHtml(fmtDate(details.user?.lastLoginAt || ''))}</div>
+            </div>
+            <div class="row">
+              <span class="pill">${escapeHtml(details.plan?.planId || 'free')}</span>
+              <span class="pill ${details.plan?.enabled ? 'ok' : 'danger'}">${details.plan?.enabled ? 'ativo' : 'inativo'}</span>
+            </div>
+          </div>
+          <div class="sub-grid" style="margin-top:10px;">
+            <div class="line-card"><div class="muted small">Perfis</div><div style="font-weight:900; margin-top:4px;">${escapeHtml(String(profiles.length))}</div></div>
+            <div class="line-card"><div class="muted small">Push tokens</div><div style="font-weight:900; margin-top:4px;">${escapeHtml(String((details.pushTokens || []).length))}</div></div>
+            <div class="line-card"><div class="muted small">Contas realtime</div><div style="font-weight:900; margin-top:4px;">${escapeHtml(String(realtimeAccounts.length))}</div></div>
+            <div class="line-card"><div class="muted small">Ultimo sync</div><div style="font-weight:900; margin-top:4px;">${escapeHtml(fmtDate(details.sync?.lastSyncAt || ''))}</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="section-title">Perfis do usuario</h3>
+          <div id="profilesEditor" class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top:10px;"></div>
+          <div id="profilesStatus" class="status"></div>
+        </div>
+
+        <div class="card">
+          <h3 class="section-title">Contexto realtime</h3>
+          <div id="realtimeArea" class="grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); margin-top:10px;"></div>
+        </div>
+
+        <div class="card">
+          <h3 class="section-title">Gestao completa por perfil</h3>
+          <div class="muted small" style="margin-top:6px;">Pesquisas, continuar assistindo, historico de assistidos, ultimo ativo e reproducao atual com progresso e capa.</div>
+          <div id="profileInsightsArea" class="profile-insight-grid" style="margin-top:10px;"></div>
+        </div>
+      `;
+
+      const profilesEditor = document.getElementById('profilesEditor');
+      const profilesStatus = document.getElementById('profilesStatus');
+      if (!profiles.length) {
+        profilesEditor.innerHTML = '<div class="muted small">Nenhum perfil encontrado no backup global.</div>';
+      } else {
+        for (const profile of profiles) {
+          const card = document.createElement('div');
+          card.className = 'line-card';
+          card.innerHTML = `
+            <div class="row" style="justify-content: space-between;">
+              <div style="font-weight:900;">${escapeHtml(profile.name || profile.id || 'Perfil')}</div>
+              <div class="row">
+                ${profile.enabled === false ? '<span class="pill danger">inativo</span>' : '<span class="pill ok">ativo</span>'}
+                ${profile.isPrimary ? '<span class="pill ok">principal</span>' : ''}
+                ${profile.kidsMode ? '<span class="pill warn">kids</span>' : ''}
+              </div>
+            </div>
+            <div class="sub-grid" style="margin-top:8px;">
+              <input class="name" value="${escapeHtml(profile.name || '')}" placeholder="Nome" />
+              <input class="avatar" value="${escapeHtml(profile.avatarUri || '')}" placeholder="Avatar URI" />
+              <input class="pin" value="${escapeHtml(profile.pin || '')}" placeholder="PIN" />
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <label class="small muted"><input type="checkbox" class="enabled" ${profile.enabled !== false ? 'checked' : ''} /> Ativo</label>
+              <label class="small muted"><input type="checkbox" class="pinEnabled" ${profile.pinEnabled ? 'checked' : ''} /> PIN</label>
+              <label class="small muted"><input type="checkbox" class="kidsMode" ${profile.kidsMode ? 'checked' : ''} /> Infantil</label>
+              <label class="small muted"><input type="checkbox" class="isPrimary" ${profile.isPrimary ? 'checked' : ''} /> Principal</label>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button class="save">Salvar</button>
+              <button class="delete danger">Excluir</button>
+            </div>
+            <div class="status"></div>
+          `;
+
+          const localStatus = card.querySelector('.status');
+          card.querySelector('.save').addEventListener('click', async () => {
+            try {
+              setStatus(localStatus, 'Salvando perfil...', true);
+              await api(`/api/admin/users/${details.user.id}/profiles/${profile.id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                  name: card.querySelector('.name').value.trim(),
+                  avatarUri: card.querySelector('.avatar').value.trim(),
+                  pin: card.querySelector('.pin').value.trim(),
+                  enabled: card.querySelector('.enabled').checked,
+                  pinEnabled: card.querySelector('.pinEnabled').checked,
+                  kidsMode: card.querySelector('.kidsMode').checked,
+                  isPrimary: card.querySelector('.isPrimary').checked,
+                }),
+              });
+              setStatus(localStatus, 'Perfil atualizado.', true);
+              await selectUser(details.user.id, true);
+            } catch (error) {
+              setStatus(localStatus, error.message, false);
+            }
+          });
+
+          card.querySelector('.delete').addEventListener('click', async () => {
+            if (!confirm(`Excluir perfil ${profile.name || profile.id}?`)) return;
+            try {
+              setStatus(localStatus, 'Excluindo perfil...', true);
+              await api(`/api/admin/users/${details.user.id}/profiles/${profile.id}`, { method: 'DELETE' });
+              setStatus(localStatus, 'Perfil excluido.', true);
+              await selectUser(details.user.id, true);
+            } catch (error) {
+              setStatus(localStatus, error.message, false);
+            }
+          });
+
+          profilesEditor.appendChild(card);
+        }
+      }
+
+      const realtimeArea = document.getElementById('realtimeArea');
+      realtimeArea.innerHTML = realtimeAccounts.map((account) => {
+        const online = (account.resolvedProfiles || []).filter((item) => item.online).length;
+        const blocked = Number(account.blockedCount || 0);
+        return `
+          <div class="line-card">
+            <div style="font-weight:900;">${escapeHtml(account.serverName || account.username || 'Conta')}</div>
+            <div class="muted small" style="margin-top:4px;">${escapeHtml(account.url || '-')}</div>
+            <div class="row" style="margin-top:8px;">
+              <span class="pill ${online ? 'ok' : ''}">online ${escapeHtml(String(online))}</span>
+              <span class="pill ${blocked ? 'warn' : ''}">bloqueados ${escapeHtml(String(blocked))}</span>
+            </div>
+          </div>
+        `;
+      }).join('') || '<div class="muted small">Sem dados realtime para este usuario.</div>';
+
+      const profileInsightsArea = document.getElementById('profileInsightsArea');
+      capturePreviewStates(profileInsightsArea);
+      if (!profiles.length) {
+        profileInsightsArea.innerHTML = '<div class="muted small">Sem perfis para mostrar detalhes.</div>';
+      } else {
+        profileInsightsArea.innerHTML = profiles.map((profile) => {
+          const runtime = getProfileRuntimeContext(details, profile.id);
+          const decoded = getProfileBackupDecoded(details, profile.id);
+          const watching = runtime.profile?.watching || null;
+          const currentProgress = getCurrentWatchingProgress(decoded, watching);
+          const poster = String(watching?.posterUrl || '').trim() || resolvePosterFromDecoded(decoded, watching?.contentId || '', watching?.contentTitle || '');
+          const previewUrl = resolvePreviewUrl(watching, decoded);
+          const accountKey = String(runtime.account?.accountKey || '');
+          const blockedList = Array.isArray(runtime.account?.blocked) ? runtime.account.blocked.map((item) => String(item)) : [];
+          const watchingContentId = String(watching?.contentId || '').trim();
+          const isBlocked = !!(watchingContentId && blockedList.includes(watchingContentId));
+
+          const searches = Array.isArray(runtime.activity?.searches) ? runtime.activity.searches.slice(0, 8) : [];
+          const watchHistory = Array.isArray(runtime.activity?.watchHistory) ? runtime.activity.watchHistory.slice(0, 8) : [];
+          const continueItems = getContinueWatchingFromDecoded(decoded).slice(0, 8);
+
+          const online = !!runtime.profile?.online;
+          const lastSeenLabel = fmtMsTimestamp(runtime.profile?.lastSeen || runtime.activity?.lastSeen || 0);
+
+          return `
+            <div class="profile-insight-card">
+              <div class="row" style="justify-content: space-between; align-items:flex-start;">
+                <div>
+                  <div style="font-weight:900;">${escapeHtml(profile.name || profile.id || 'Perfil')}</div>
+                  <div class="muted small">ID ${escapeHtml(profile.id || '-')} • ultimo ativo ${escapeHtml(lastSeenLabel)}</div>
+                </div>
+                <div class="row">
+                  ${profile.enabled === false ? '<span class="chip" style="border-color: rgba(255,99,99,0.5); color:#ffb4b4;">inativo</span>' : '<span class="chip">ativo</span>'}
+                  ${profile.isPrimary ? '<span class="chip">principal</span>' : ''}
+                  ${profile.kidsMode ? '<span class="chip">kids</span>' : ''}
+                  <span class="pill ${online ? 'ok' : ''}">${online ? 'online agora' : 'offline'}</span>
+                </div>
+              </div>
+
+              <div class="watching-layout">
+                <div class="poster-thumb">
+                  ${poster
+                    ? `<img src="${escapeHtml(poster)}" alt="capa" />`
+                    : 'Sem capa'}
+                </div>
+                <div>
+                  <div class="muted small">Assistindo agora</div>
+                  <div style="font-weight:800; margin-top:2px;">${escapeHtml(watching?.contentTitle || 'Nenhum conteudo em execucao')}</div>
+                  <div class="muted small" style="margin-top:2px;">${escapeHtml(watching ? `${watching.contentType || 'movie'} • ${watching.contentId || '-'}` : '-')}</div>
+                  <div class="progress-track"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, Number(currentProgress.percent || 0)))}%;"></div></div>
+                  <div class="muted small" style="margin-top:4px;">Progresso ${escapeHtml(toPct(currentProgress.percent || 0))} • ${escapeHtml(currentProgress.label || '')}</div>
+                  <div class="preview-status ${isBlocked ? 'blocked' : (previewUrl ? 'connecting' : 'idle')}"><span class="preview-status-dot"></span><span class="preview-status-text">${isBlocked ? 'Bloqueado agora' : (previewUrl ? 'Conectando preview' : 'Sem stream')}</span></div>
+                  <div class="preview-shell">
+                    ${previewUrl
+                       ? `<video class="watch-preview" src="${escapeHtml(buildAdminPreviewSourceUrl(previewUrl, watching?.contentType || ''))}" data-preview-url="${escapeHtml(previewUrl)}" data-content-type="${escapeHtml(String(watching?.contentType || 'movie'))}" data-profile-id="${escapeHtml(String(profile.id || ''))}" data-content-id="${escapeHtml(watchingContentId)}" data-preview-position-ms="${escapeHtml(String(Math.max(0, Number(watching?.positionMs || 0))))}" ${poster ? `poster="${escapeHtml(poster)}"` : ''} controls autoplay playsinline preload="metadata" muted></video>
+                         <div class="preview-overlay"><div class="preview-overlay-label"><span>Sincronizacao</span><span>${escapeHtml(toPct(currentProgress.percent || 0))}</span></div><div class="preview-overlay-track"><div class="preview-overlay-fill" style="width:${Math.max(0, Math.min(100, Number(currentProgress.percent || 0)))}%;"></div></div></div>`
+                      : '<div class="muted small">Preview em tempo real indisponivel.</div>'}
+                  </div>
+                  <div class="row" style="margin-top:8px;">
+                    ${watching
+                      ? `<button class="insight-action-btn ${isBlocked ? 'warn' : 'danger'}" data-action="${isBlocked ? 'unblock-current' : 'block-current'}" data-user-id="${escapeHtml(details.user.id)}" data-account-key="${escapeHtml(accountKey)}" data-profile-id="${escapeHtml(profile.id)}" data-content-id="${escapeHtml(watchingContentId)}" data-content-title="${escapeHtml(String(watching.contentTitle || 'Conteudo'))}">${isBlocked ? 'Desbloquear conteudo atual' : 'Bloquear conteudo atual'}</button>`
+                      : '<span class="muted small">Sem conteudo para bloquear no momento.</span>'}
+                    ${previewUrl ? `<a class="pill" href="${escapeHtml(previewUrl)}" target="_blank" rel="noreferrer">Abrir stream</a>` : ''}
+                  </div>
+                </div>
+              </div>
+
+              <div class="sub-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+                <div class="line-card">
+                  <div class="muted small">Pesquisas recentes</div>
+                  <div class="list-stack" style="margin-top:6px;">
+                    ${searches.length
+                      ? searches.map((item) => `<div class="list-item"><div style="font-weight:700;">${escapeHtml(item?.query || '-')}</div><div class="muted small">${escapeHtml(fmtMsTimestamp(item?.ts || item?.at || 0))}</div></div>`).join('')
+                      : '<div class="muted small">Sem pesquisas recentes.</div>'}
+                  </div>
+                </div>
+
+                <div class="line-card">
+                  <div class="muted small">Historico de assistidos</div>
+                  <div class="list-stack" style="margin-top:6px;">
+                    ${watchHistory.length
+                      ? watchHistory.map((item) => `<div class="list-item"><div style="font-weight:700;">${escapeHtml(item?.contentTitle || '-')}</div><div class="muted small">${escapeHtml(String(item?.durationMin || 0))} min • ${escapeHtml(fmtMsTimestamp(item?.ts || item?.at || 0))}</div></div>`).join('')
+                      : '<div class="muted small">Sem historico recente.</div>'}
+                  </div>
+                </div>
+
+                <div class="line-card">
+                  <div class="muted small">Continuar assistindo</div>
+                  <div class="list-stack" style="margin-top:6px;">
+                    ${continueItems.length
+                      ? continueItems.map((item) => `<div class="list-item"><div style="font-weight:700;">${escapeHtml(item?.title || '-')}</div><div class="muted small">${escapeHtml(item?.type || '-')} • ${escapeHtml(toPct(item?.progress || 0))}</div></div>`).join('')
+                      : '<div class="muted small">Sem itens para continuar.</div>'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      initPreviewPlayers(profileInsightsArea);
+
+      for (const btn of profileInsightsArea.querySelectorAll('button[data-action="block-current"]')) {
+        btn.addEventListener('click', async () => {
+          const userId = String(btn.dataset.userId || '').trim();
+          const accountKey = String(btn.dataset.accountKey || '').trim();
+          const targetProfileId = String(btn.dataset.profileId || '').trim();
+          const contentId = String(btn.dataset.contentId || '').trim();
+          const contentTitle = String(btn.dataset.contentTitle || '').trim() || 'Conteudo';
+          if (!userId || !accountKey || !contentId) return;
+
+          try {
+            btn.disabled = true;
+            const response = await api(`/api/admin/users/${encodeURIComponent(userId)}/parental/block`, {
+              method: 'POST',
+              body: JSON.stringify({ accountKey, targetProfileId, contentId, contentTitle }),
+            });
+
+            const blocked = Array.isArray(response?.blocked)
+              ? response.blocked.map((item) => String(item || '').trim())
+              : [];
+            updateProfileCardBlockUi(profileInsightsArea, contentId, blocked.includes(contentId));
+          } catch (error) {
+            alert(error.message || 'Falha ao bloquear conteudo.');
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      }
+
+      for (const btn of profileInsightsArea.querySelectorAll('button[data-action="unblock-current"]')) {
+        btn.addEventListener('click', async () => {
+          const userId = String(btn.dataset.userId || '').trim();
+          const accountKey = String(btn.dataset.accountKey || '').trim();
+          const contentId = String(btn.dataset.contentId || '').trim();
+          if (!userId || !accountKey || !contentId) return;
+
+          try {
+            btn.disabled = true;
+            const response = await api(`/api/admin/users/${encodeURIComponent(userId)}/parental/unblock`, {
+              method: 'POST',
+              body: JSON.stringify({ accountKey, contentId }),
+            });
+
+            const blocked = Array.isArray(response?.blocked)
+              ? response.blocked.map((item) => String(item || '').trim())
+              : [];
+            updateProfileCardBlockUi(profileInsightsArea, contentId, blocked.includes(contentId));
+          } catch (error) {
+            alert(error.message || 'Falha ao desbloquear conteudo.');
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      }
+
+      setStatus(profilesStatus, '');
+    }
+
+    async function selectUser(userId, silent = false) {
+      selectedUserId = userId;
+      renderUsersList();
+      try {
+        if (!silent) setStatus(usersStatus, 'Carregando detalhes...', true);
+        const body = await api(`/api/admin/users/${userId}/details`);
+        const nextFingerprint = buildRealtimeFingerprint(body);
+
+        if (
+          silent &&
+          selectedUserDetails &&
+          String(selectedUserId || '') === String(userId || '') &&
+          nextFingerprint === selectedUserRealtimeFingerprint
+        ) {
+          return;
+        }
+
+        selectedUserRealtimeFingerprint = nextFingerprint;
+        selectedUserDetails = body;
+        renderUserDetails();
+        if (!silent) setStatus(usersStatus, 'Detalhes carregados.', true);
+      } catch (error) {
+        setStatus(usersStatus, error.message, false);
+      }
+    }
+
+    function renderActivationsPage() {
+      activationsBody.innerHTML = users.map((user) => {
+        const options = plansCatalog.map((plan) => `<option value="${escapeHtml(plan.id)}" ${user.plan?.planId === plan.id ? 'selected' : ''}>${escapeHtml(plan.id)}</option>`).join('');
+        const statusOptions = ['active', 'grace', 'expired', 'unknown']
+          .map((status) => `<option value="${status}" ${user.plan?.status === status ? 'selected' : ''}>${status}</option>`)
+          .join('');
+
+        return `
+          <tr data-user-id="${escapeHtml(user.id)}">
+            <td><div style="font-weight:800;">${escapeHtml(user.name || user.id)}</div><div class="muted small">${escapeHtml(user.email || '')}</div></td>
+            <td><select class="a-plan">${options}</select></td>
+            <td><select class="a-status">${statusOptions}</select></td>
+            <td><input class="a-due" value="${escapeHtml(user.plan?.paymentDueAt || '')}" placeholder="2026-12-31" /></td>
+            <td><input class="a-amount" value="${escapeHtml(user.plan?.paymentAmount || '')}" placeholder="R$ 39,90" /></td>
+            <td><label class="small"><input type="checkbox" class="a-enabled" ${user.plan?.enabled ? 'checked' : ''} /> Ativo</label></td>
+            <td>
+              <div class="row">
+                <button class="save-plan">Salvar</button>
+                <button class="toggle-active warn">Alternar</button>
+              </div>
+              <div class="status"></div>
+            </td>
+          </tr>
+        `;
+      }).join('') || '<tr><td colspan="7" class="muted small">Sem usuarios para ativacao.</td></tr>';
+
+      for (const row of activationsBody.querySelectorAll('tr[data-user-id]')) {
+        const userId = row.dataset.userId;
+        const localStatus = row.querySelector('.status');
+
+        row.querySelector('.save-plan').addEventListener('click', async () => {
+          try {
+            setStatus(localStatus, 'Salvando...', true);
+            await api(`/api/admin/users/${userId}/plan`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                planId: row.querySelector('.a-plan').value,
+                status: row.querySelector('.a-status').value,
+                paymentDueAt: row.querySelector('.a-due').value.trim(),
+                paymentAmount: row.querySelector('.a-amount').value.trim(),
+                enabled: row.querySelector('.a-enabled').checked,
+              }),
+            });
+            setStatus(localStatus, 'Plano atualizado.', true);
+            await loadUsers(true);
+          } catch (error) {
+            setStatus(localStatus, error.message, false);
+          }
+        });
+
+        row.querySelector('.toggle-active').addEventListener('click', async () => {
+          try {
+            setStatus(localStatus, 'Alternando ativacao...', true);
+            await api(`/api/admin/users/${userId}/active`, {
+              method: 'PATCH',
+              body: JSON.stringify({ active: !row.querySelector('.a-enabled').checked }),
+            });
+            setStatus(localStatus, 'Ativacao alterada.', true);
+            await loadUsers(true);
+          } catch (error) {
+            setStatus(localStatus, error.message, false);
+          }
+        });
+      }
+
+      featuresMatrixBody.innerHTML = plansCatalog.map((plan) => `
+        <tr>
+          <td>${escapeHtml(plan.name || plan.id)}</td>
+          <td>${escapeHtml((plan.features || []).join(', ') || '-')}</td>
+          <td>${escapeHtml(String(plan.maxProfiles ?? '-'))}</td>
+          <td>${escapeHtml(String(plan.maxServers ?? '-'))}</td>
+          <td>${plan.enabled ? '<span class="pill ok">ativo</span>' : '<span class="pill danger">inativo</span>'}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="5" class="muted small">Sem matriz de recursos.</td></tr>';
+    }
+
+    function renderLogs() {
+      const query = String(logsFilterInput.value || '').trim().toLowerCase();
+      const filtered = logsData.filter((log) => {
+        if (!query) return true;
+        const text = [log.event, JSON.stringify(log.payload || {})].join(' ').toLowerCase();
+        return text.includes(query);
+      });
+
+      logsBody.innerHTML = filtered.map((log) => `
+        <tr>
+          <td>${escapeHtml(fmtDate(log.ts))}</td>
+          <td>${escapeHtml(log.event || '-')}</td>
+          <td><pre style="margin:0; white-space:pre-wrap; color:#dbe4ff; font-size:0.78rem;">${escapeHtml(JSON.stringify(log.payload || {}, null, 2))}</pre></td>
+        </tr>
+      `).join('') || '<tr><td colspan="3" class="muted small">Sem logs para mostrar.</td></tr>';
+    }
+
+    async function loadUsers(silent = false) {
+      try {
+        if (!silent) setStatus(usersStatus, 'Carregando usuarios...', true);
+        const body = await api('/api/admin/users');
+        users = Array.isArray(body.users) ? body.users : [];
+        renderUsersList();
+        renderActivationsPage();
+        if (!silent) setStatus(usersStatus, `${users.length} usuario(s) carregado(s).`, true);
+        if (!selectedUserId && users.length) {
+          await selectUser(users[0].id, true);
+        }
+      } catch (error) {
+        setStatus(usersStatus, error.message, false);
+      }
+    }
+
+    async function loadDashboard(silent = false) {
+      const body = await api('/api/admin/dashboard');
+      dashboardData = body.dashboard || null;
+      renderDashboard();
+      if (!silent) {
+        generatedAt.textContent = `Atualizado em ${fmtDate(dashboardData?.generatedAt || new Date().toISOString())}`;
+      }
+    }
+
+    async function loadServerMetrics() {
+      const body = await api('/api/admin/server/metrics');
+      serverMetrics = body.metrics || null;
+      renderServerMetrics();
+    }
+
+    async function loadPlayersMonitor(silent = false) {
+      try {
+        if (!silent) setStatus(playersStatus, 'Carregando monitor de players...', true);
+        const body = await api('/api/admin/players/monitor');
+        playersMonitor = body.monitor || null;
+        renderPlayersMonitor();
+        if (!silent) {
+          const total = Number(playersMonitor?.summary?.activePlayers || 0);
+          setStatus(playersStatus, `${total} player(s) ativo(s).`, true);
+        }
+      } catch (error) {
+        setStatus(playersStatus, error.message, false);
+      }
+    }
+
+    async function loadLogs(silent = false) {
+      try {
+        if (!silent) setStatus(logsStatus, 'Carregando logs...', true);
+        const body = await api('/api/admin/logs?limit=250');
+        logsData = Array.isArray(body.logs) ? body.logs : [];
+        renderLogs();
+        if (!silent) setStatus(logsStatus, `${logsData.length} log(s) carregado(s).`, true);
+      } catch (error) {
+        setStatus(logsStatus, error.message, false);
+      }
+    }
+
+    function renderProxySessions() {
+      if (!proxySessionsBody) return;
+
+      if (!Array.isArray(proxySessions) || proxySessions.length === 0) {
+        proxySessionsBody.innerHTML = '<tr><td colspan="9" class="muted">Nenhuma sessao proxy ativa no momento.</td></tr>';
+        return;
+      }
+
+      proxySessionsBody.innerHTML = proxySessions.map((s) => {
+        const sessionId = escapeHtml(s.id || '-');
+        const userId = escapeHtml(s.userId || '-');
+        const profileName = escapeHtml(s.profileName || '-');
+        const hlsInfo = escapeHtml(`${s.processingPath || 'direct'} • ${s.hlsType || '-'} • ${s.quality || 'auto'}`);
+        const hlsFlags = escapeHtml(`LL:${s.lowLatencyLive === false ? 'off' : 'on'} RC:${s.aggressiveReconnect === false ? 'off' : 'on'} CT:${s.contentType || '-'}`);
+        const url = escapeHtml(s.url || '-');
+        const startedAt = escapeHtml(fmtDate(s.startedAt));
+        const lastSeenAt = escapeHtml(fmtDate(s.lastSeenAt));
+        const bytes = escapeHtml(fmtNumber(s.bytesProxied || 0));
+        return `
+          <tr>
+            <td>${sessionId}</td>
+            <td>${userId}</td>
+            <td>${profileName}</td>
+            <td><div class="small">${hlsInfo}</div><div class="muted small">${hlsFlags}</div></td>
+            <td title="${url}">${url}</td>
+            <td>${startedAt}</td>
+            <td>${lastSeenAt}</td>
+            <td>${bytes}</td>
+            <td><button class="danger" data-action="stop-proxy-session" data-id="${sessionId}">Encerrar</button></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function loadProxySessions(silent = false) {
+      try {
+        if (!silent) setStatus(proxyStatus, 'Carregando sessoes proxy...', true);
+        const body = await api('/api/admin/proxy-sessions');
+        proxySessions = Array.isArray(body.sessions) ? body.sessions : [];
+        renderProxySessions();
+        if (!silent) setStatus(proxyStatus, `${proxySessions.length} sessao(oes) proxy ativa(s).`, true);
+      } catch (error) {
+        setStatus(proxyStatus, error.message, false);
+      }
+    }
+
+    async function stopProxySession(sessionId) {
+      if (!sessionId) return;
+      try {
+        await api(`/api/admin/proxy-sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+        await loadProxySessions(false);
+      } catch (error) {
+        setStatus(proxyStatus, error.message, false);
+      }
+    }
+
+    function readFfmpegConfigFromForm() {
+      return {
+        enabled: document.getElementById('ffm-enabled').checked,
+        copyThreads: Number(document.getElementById('ffm-copyThreads').value || 1),
+        transcodeThreads: Number(document.getElementById('ffm-transcodeThreads').value || 2),
+        preset: document.getElementById('ffm-preset').value.trim(),
+        tune: document.getElementById('ffm-tune').value.trim(),
+        videoProfile: document.getElementById('ffm-videoProfile').value.trim(),
+        videoLevel: document.getElementById('ffm-videoLevel').value.trim(),
+        probeSize: Number(document.getElementById('ffm-probeSize').value || 5000000),
+        analyzeDuration: Number(document.getElementById('ffm-analyzeDuration').value || 2000000),
+        multipleRequests: document.getElementById('ffm-multipleRequests').checked,
+        httpPersistent: document.getElementById('ffm-httpPersistent').checked,
+        defaultLowLatencyLive: document.getElementById('ffm-defaultLowLatencyLive').checked,
+        defaultAggressiveReconnect: document.getElementById('ffm-defaultAggressiveReconnect').checked,
+        liveHlsTimeFast: Number(document.getElementById('ffm-liveHlsTimeFast').value || 2),
+        liveHlsListFast: Number(document.getElementById('ffm-liveHlsListFast').value || 6),
+        liveHlsTimeSafe: Number(document.getElementById('ffm-liveHlsTimeSafe').value || 4),
+        liveHlsListSafe: Number(document.getElementById('ffm-liveHlsListSafe').value || 10),
+        vodHlsTime: Number(document.getElementById('ffm-vodHlsTime').value || 4),
+        vodHlsListSize: Number(document.getElementById('ffm-vodHlsListSize').value || 0),
+        pipelineTtlMs: Number(document.getElementById('ffm-pipelineTtlMs').value || 120000),
+      };
+    }
+
+    function fillFfmpegConfigForm(config) {
+      const c = config || {};
+      document.getElementById('ffm-enabled').checked = c.enabled !== false;
+      document.getElementById('ffm-copyThreads').value = String(c.copyThreads ?? 1);
+      document.getElementById('ffm-transcodeThreads').value = String(c.transcodeThreads ?? 2);
+      document.getElementById('ffm-preset').value = String(c.preset ?? 'ultrafast');
+      document.getElementById('ffm-tune').value = String(c.tune ?? 'zerolatency');
+      document.getElementById('ffm-videoProfile').value = String(c.videoProfile ?? 'baseline');
+      document.getElementById('ffm-videoLevel').value = String(c.videoLevel ?? '3.1');
+      document.getElementById('ffm-probeSize').value = String(c.probeSize ?? 5000000);
+      document.getElementById('ffm-analyzeDuration').value = String(c.analyzeDuration ?? 2000000);
+      document.getElementById('ffm-multipleRequests').checked = c.multipleRequests !== false;
+      document.getElementById('ffm-httpPersistent').checked = c.httpPersistent !== false;
+      document.getElementById('ffm-defaultLowLatencyLive').checked = c.defaultLowLatencyLive !== false;
+      document.getElementById('ffm-defaultAggressiveReconnect').checked = c.defaultAggressiveReconnect !== false;
+      document.getElementById('ffm-liveHlsTimeFast').value = String(c.liveHlsTimeFast ?? 2);
+      document.getElementById('ffm-liveHlsListFast').value = String(c.liveHlsListFast ?? 6);
+      document.getElementById('ffm-liveHlsTimeSafe').value = String(c.liveHlsTimeSafe ?? 4);
+      document.getElementById('ffm-liveHlsListSafe').value = String(c.liveHlsListSafe ?? 10);
+      document.getElementById('ffm-vodHlsTime').value = String(c.vodHlsTime ?? 4);
+      document.getElementById('ffm-vodHlsListSize').value = String(c.vodHlsListSize ?? 0);
+      document.getElementById('ffm-pipelineTtlMs').value = String(c.pipelineTtlMs ?? 120000);
+    }
+
+    function renderFfmpegLogs() {
+      if (!Array.isArray(ffmpegLogs) || !ffmpegLogs.length) {
+        ffmpegLogsBody.innerHTML = '<tr><td colspan="3" class="muted small">Sem logs FFmpeg no momento.</td></tr>';
+        return;
+      }
+      ffmpegLogsBody.innerHTML = ffmpegLogs.map((item) => `
+        <tr>
+          <td>${escapeHtml(fmtDate(item.ts))}</td>
+          <td>${escapeHtml(item.event || '-')}</td>
+          <td><pre style="margin:0; white-space:pre-wrap; color:#dbe4ff; font-size:0.78rem;">${escapeHtml(JSON.stringify(item.payload || {}, null, 2))}</pre></td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadFfmpegConfig(silent = false) {
+      try {
+        if (!silent) setStatus(ffmpegConfigStatus, 'Carregando configuracoes FFmpeg...', true);
+        const body = await api('/api/admin/ffmpeg/config');
+        ffmpegConfig = body?.config || null;
+        fillFfmpegConfigForm(ffmpegConfig || {});
+        ffmpegConfigMeta.textContent = `FFmpeg bin: ${String(body?.ffmpegBin || '-')} | Pipelines ativos: ${fmtNumber(body?.summary?.activePipelines || 0)} | Logs: ${fmtNumber(body?.summary?.totalLogs || 0)}`;
+        if (!silent) setStatus(ffmpegConfigStatus, 'Configuracao FFmpeg carregada.', true);
+      } catch (error) {
+        setStatus(ffmpegConfigStatus, error.message, false);
+      }
+    }
+
+    async function saveFfmpegConfig() {
+      try {
+        setStatus(ffmpegConfigStatus, 'Salvando configuracao FFmpeg...', true);
+        const payload = readFfmpegConfigFromForm();
+        const body = await api('/api/admin/ffmpeg/config', {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        ffmpegConfig = body?.config || payload;
+        fillFfmpegConfigForm(ffmpegConfig || {});
+        setStatus(ffmpegConfigStatus, 'Configuracao FFmpeg salva com sucesso.', true);
+        await loadFfmpegLogs(true);
+      } catch (error) {
+        setStatus(ffmpegConfigStatus, error.message, false);
+      }
+    }
+
+    async function loadFfmpegLogs(silent = false) {
+      try {
+        if (!silent) setStatus(ffmpegLogsStatus, 'Carregando logs FFmpeg...', true);
+        const body = await api('/api/admin/ffmpeg/logs?limit=350');
+        ffmpegLogs = Array.isArray(body?.logs) ? body.logs : [];
+        renderFfmpegLogs();
+        if (!silent) setStatus(ffmpegLogsStatus, `${ffmpegLogs.length} log(s) carregado(s).`, true);
+      } catch (error) {
+        setStatus(ffmpegLogsStatus, error.message, false);
+      }
+    }
+
+    async function clearFfmpegLogs() {
+      try {
+        await api('/api/admin/ffmpeg/logs', { method: 'DELETE' });
+        await loadFfmpegLogs(false);
+      } catch (error) {
+        setStatus(ffmpegLogsStatus, error.message, false);
+      }
+    }
+
+    async function refreshAllData() {
+      try {
+        generatedAt.textContent = 'Atualizando dados do painel...';
+        await Promise.all([
+          loadDashboard(true),
+          loadUsers(true),
+          loadPlansCatalog(true),
+          loadServerMetrics(),
+          loadPlayersMonitor(true),
+          loadLogs(true),
+          loadProxySessions(true),
+          loadFfmpegConfig(true),
+          loadFfmpegLogs(true),
+        ]);
+        renderActivationsPage();
+        generatedAt.textContent = `Atualizado em ${fmtDate(new Date().toISOString())}`;
+      } catch (error) {
+        generatedAt.textContent = `Falha ao atualizar: ${error.message}`;
+      }
+    }
+
+    function startLiveRefresh() {
+      if (liveRefreshTimer) {
+        clearInterval(liveRefreshTimer);
+      }
+
+      liveRefreshTimer = setInterval(() => {
+        if (!token) return;
+
+        if (route === 'users') {
+          if (selectedUserId) {
+            selectUser(selectedUserId, true).catch(() => null);
+          } else {
+            loadUsers(true).catch(() => null);
+          }
+          return;
+        }
+
+        if (route === 'dashboard') {
+          loadDashboard(true).catch(() => null);
+          return;
+        }
+
+        if (route === 'server') {
+          loadServerMetrics().catch(() => null);
+          return;
+        }
+
+        if (route === 'players') {
+          loadPlayersMonitor(true).catch(() => null);
+          return;
+        }
+
+        if (route === 'ffmpeg') {
+          loadFfmpegConfig(true).catch(() => null);
+          loadFfmpegLogs(true).catch(() => null);
+        }
+      }, 10000);
     }
 
     async function login() {
       try {
         setStatus(loginStatus, 'Entrando...', true);
+        const tokenInput = document.getElementById('adminToken').value.trim();
         const body = await api('/api/admin/login', {
           method: 'POST',
-          body: JSON.stringify({ token: adminTokenInput.value.trim() }),
+          body: JSON.stringify({ token: tokenInput }),
           headers: {},
         });
+
         token = body.token;
         localStorage.setItem('admin.jwt', token);
-        loginCard.style.display = 'none';
-        actionsCard.style.display = 'block';
+        loginCard.classList.add('hidden');
+        appShell.classList.remove('hidden');
         setStatus(loginStatus, '');
-        await loadUsers();
-      } catch (err) {
-        setStatus(loginStatus, err.message, false);
+        startLiveRefresh();
+
+        await refreshAllData();
+        await loadSubscriptionContentConfig(true);
+      } catch (error) {
+        setStatus(loginStatus, error.message, false);
       }
     }
 
     function logout() {
       token = '';
+      if (liveRefreshTimer) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+      }
       localStorage.removeItem('admin.jwt');
-      usersGrid.innerHTML = '';
-      loginCard.style.display = 'block';
-      actionsCard.style.display = 'none';
-      setStatus(actionStatus, '');
+      users = [];
+      selectedUserId = '';
+      selectedUserDetails = null;
+      plansCatalog = [];
+      dashboardData = null;
+      serverMetrics = null;
+      playersMonitor = null;
+      logsData = [];
+      loginCard.classList.remove('hidden');
+      appShell.classList.add('hidden');
+      generatedAt.textContent = 'Aguardando dados';
     }
 
     document.getElementById('loginBtn').addEventListener('click', login);
-    document.getElementById('refreshBtn').addEventListener('click', loadUsers);
     document.getElementById('logoutBtn').addEventListener('click', logout);
+    document.getElementById('refreshBtn').addEventListener('click', refreshAllData);
+    document.getElementById('refreshPlansBtn').addEventListener('click', () => loadPlansCatalog(false));
+    document.getElementById('saveSubscriptionContentBtn').addEventListener('click', saveSubscriptionContentConfig);
+    document.getElementById('refreshUsersBtn').addEventListener('click', () => loadUsers(false));
+    document.getElementById('refreshLogsBtn').addEventListener('click', () => loadLogs(false));
+    document.getElementById('refreshProxyBtn').addEventListener('click', () => loadProxySessions(false));
+    document.getElementById('refreshPlayersBtn').addEventListener('click', () => loadPlayersMonitor(false));
+    document.getElementById('refreshFfmpegBtn').addEventListener('click', () => loadFfmpegConfig(false));
+    document.getElementById('saveFfmpegBtn').addEventListener('click', saveFfmpegConfig);
+    document.getElementById('refreshFfmpegLogsBtn').addEventListener('click', () => loadFfmpegLogs(false));
+    document.getElementById('clearFfmpegLogsBtn').addEventListener('click', clearFfmpegLogs);
+
+    usersSearchInput.addEventListener('input', renderUsersList);
+    logsFilterInput.addEventListener('input', renderLogs);
+
+    proxySessionsBody.addEventListener('click', (event) => {
+      const btn = event.target.closest('button[data-action="stop-proxy-session"]');
+      if (!btn) return;
+      const id = btn.dataset.id;
+      stopProxySession(id);
+    });
+
+    for (const routeBtn of document.querySelectorAll('.route-btn')) {
+      routeBtn.addEventListener('click', () => setRoute(routeBtn.dataset.route));
+    }
 
     if (token) {
-      loginCard.style.display = 'none';
-      actionsCard.style.display = 'block';
-      loadUsers();
+      loginCard.classList.add('hidden');
+      appShell.classList.remove('hidden');
+      startLiveRefresh();
+      refreshAllData().then(() => loadSubscriptionContentConfig(true)).catch((error) => {
+        logout();
+        setStatus(loginStatus, error.message, false);
+      });
     }
   </script>
 </body>

@@ -343,6 +343,26 @@ export async function fetchTmdbContentDetailsByTitle(
   }
 }
 
+export async function fetchTmdbMetaByTitle(
+  kind: TmdbKind,
+  title: string,
+  year?: number
+): Promise<TmdbMeta | null> {
+  try {
+    const query = encodeURIComponent(title.trim());
+    if (!query) return null;
+
+    const search = (await fetchTmdb(`/search/${kind}?query=${query}&include_adult=false&page=1`)) as TmdbResponse;
+    const searchItems = Array.isArray(search.results) ? search.results : [];
+    const picked = pickTmdbSearchResult(searchItems, title, year);
+    if (!picked) return null;
+
+    return toMeta(picked);
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchTmdbPersonBio(personId: number): Promise<TmdbPersonBio | null> {
   try {
     const raw = (await fetchTmdb(`/person/${personId}`)) as TmdbPerson;
