@@ -357,23 +357,6 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              ref={quickBtnRef}
-              style={[
-                styles.secondaryBtn,
-                isLargeDevice && stylesTv.actionBtn,
-                isLargeDevice && focusedAction === 'quick' && stylesTv.actionBtnFocused,
-              ]}
-              onPress={() => router.replace('/xtream-login')}
-              onFocus={() => setFocusedAction('quick')}
-              onBlur={() => setFocusedAction('')}
-              nextFocusUp={isLargeDevice ? (findNodeHandle(xtreamBtnRef.current) ?? undefined) : undefined}
-              nextFocusDown={isLargeDevice ? (findNodeHandle(registerBtnRef.current) ?? undefined) : undefined}
-            >
-              <MaterialIcons name="bolt" size={18} color={StreamingTheme.colors.textPrimary} />
-              <Text style={styles.secondaryBtnText}>Entrar rapido com Xtream</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
               ref={registerBtnRef}
               style={[
                 styles.linkBtn,

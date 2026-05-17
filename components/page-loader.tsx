@@ -57,7 +57,7 @@ export function PageLoader({ visible, label = 'Carregando...' }: PageLoaderProps
           <View style={styles.loaderOrb} />
           <ActivityIndicator size="large" color={StreamingTheme.colors.accentAlt} />
           <Text style={styles.label}>{label}</Text>
-          <Text style={styles.caption}>Aplicando cache local e preparando a interface.</Text>
+          <Text style={styles.caption}>Só um momento...</Text>
         </GlassSurface>
       </Animated.View>
     </View>
