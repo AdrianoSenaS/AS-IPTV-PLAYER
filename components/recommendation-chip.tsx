@@ -26,11 +26,9 @@ const TOKENS: Array<{ kind: ReasonKind; test: (text: string) => boolean }> = [
       text.includes('suspense') ||
       text.includes('romance') ||
       text.includes('ficção') ||
-      text.includes('ficcao') ||
       text.includes('história viciante') ||
-      text.includes('historia viciante') ||
-      text.includes('para maratonar') ||
-      text.includes('para rir'),
+      text.includes('maratonar') ||
+      text.includes('rir'),
   },
   {
     kind: 'category',
@@ -43,12 +41,10 @@ const TOKENS: Array<{ kind: ReasonKind; test: (text: string) => boolean }> = [
     kind: 'history',
     test: (text) =>
       text.includes('histórico') ||
-      text.includes('historico') ||
       text.includes('parecido') ||
       text.includes('seu perfil') ||
       text.includes('seu tipo') ||
       text.includes('você parou') ||
-      text.includes('voce parou') ||
       text.includes('retome') ||
       text.includes('continue'),
   },

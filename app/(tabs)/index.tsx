@@ -102,12 +102,33 @@ type ContextBannerMeta = {
   border: string;
 };
 
-type HomeSectionId = 'featured' | 'continue' | 'movies' | 'series' | 'live';
+type HomeSectionId =
+  | 'featured'
+  | 'continue'
+  | 'movies'
+  | 'actionMovies'
+  | 'comedyMovies'
+  | 'sciFiMovies'
+  | 'series'
+  | 'actionSeries'
+  | 'comedySeries'
+  | 'sciFiSeries'
+  | 'live'
+  | 'sportsLive'
+  | 'newsLive';
 
 const HOME_SEARCH_LIMIT = 8;
 const HOME_STAGE_MOVIES = 1;
 const HOME_STAGE_SERIES = 2;
-const HOME_STAGE_LIVE = 3;
+const HOME_STAGE_ACTION_MOVIES = 3;
+const HOME_STAGE_COMEDY_MOVIES = 4;
+const HOME_STAGE_SCIFI_MOVIES = 5;
+const HOME_STAGE_ACTION_SERIES = 6;
+const HOME_STAGE_COMEDY_SERIES = 7;
+const HOME_STAGE_SCIFI_SERIES = 8;
+const HOME_STAGE_LIVE = 9;
+const HOME_STAGE_SPORTS_LIVE = 10;
+const HOME_STAGE_NEWS_LIVE = 11;
 const SECTION_VIEWABILITY_CONFIG = {
   itemVisiblePercentThreshold: 20,
   minimumViewTime: 120,
@@ -117,11 +138,33 @@ const SECTION_PLACEHOLDER_HEIGHT: Record<HomeSectionId, number> = {
   featured: 220,
   continue: 180,
   movies: 250,
+  actionMovies: 250,
+  comedyMovies: 250,
+  sciFiMovies: 250,
   series: 250,
+  actionSeries: 250,
+  comedySeries: 250,
+  sciFiSeries: 250,
   live: 220,
+  sportsLive: 220,
+  newsLive: 220,
 };
 
-const SECTION_ORDER: HomeSectionId[] = ['featured', 'continue', 'movies', 'series', 'live'];
+const SECTION_ORDER: HomeSectionId[] = [
+  'featured',
+  'continue',
+  'movies',
+  'actionMovies',
+  'comedyMovies',
+  'sciFiMovies',
+  'series',
+  'actionSeries',
+  'comedySeries',
+  'sciFiSeries',
+  'live',
+  'sportsLive',
+  'newsLive',
+];
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
   return new Promise<T>((resolve) => {
@@ -148,6 +191,13 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
   });
 }
 
+function filterContentByGenre(items: StreamItem[], genreKeywords: string[]): StreamItem[] {
+  return items.filter((item) => {
+    const genres = `${toText(item.genre)} ${toText(item.category_name)}`.toLowerCase();
+    return genreKeywords.some((keyword) => genres.includes(keyword.toLowerCase()));
+  });
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   useScreenBenchmark('home');
@@ -165,8 +215,16 @@ export default function HomeScreen() {
   const [featuredContent, setFeaturedContent] = useState<StreamItem[]>([]);
   const [featuredItems, setFeaturedItems] = useState<FeaturedItem[]>([]);
   const [popularMovies, setPopularMovies] = useState<StreamItem[]>([]);
+  const [actionMovies, setActionMovies] = useState<StreamItem[]>([]);
+  const [comedyMovies, setComedyMovies] = useState<StreamItem[]>([]);
+  const [sciFiMovies, setSciFiMovies] = useState<StreamItem[]>([]);
   const [liveChannels, setLiveChannels] = useState<StreamItem[]>([]);
+  const [sportsLive, setSportsLive] = useState<StreamItem[]>([]);
+  const [newsLive, setNewsLive] = useState<StreamItem[]>([]);
   const [featuredSeries, setFeaturedSeries] = useState<StreamItem[]>([]);
+  const [actionSeries, setActionSeries] = useState<StreamItem[]>([]);
+  const [comedySeries, setComedySeries] = useState<StreamItem[]>([]);
+  const [sciFiSeries, setSciFiSeries] = useState<StreamItem[]>([]);
   const [homeSearch, setHomeSearch] = useState('');
   const [activeFeaturedIndex, setActiveFeaturedIndex] = useState(0);
   const [searchResults, setSearchResults] = useState<SearchItem[]>([]);
@@ -186,8 +244,16 @@ export default function HomeScreen() {
     featured: true,
     continue: false,
     movies: false,
+    actionMovies: false,
+    comedyMovies: false,
+    sciFiMovies: false,
     series: false,
+    actionSeries: false,
+    comedySeries: false,
+    sciFiSeries: false,
     live: false,
+    sportsLive: false,
+    newsLive: false,
   });
   const bannerTransition = useRef(new Animated.Value(1)).current;
   const bannerContentTransition = useRef(new Animated.Value(1)).current;
@@ -211,7 +277,7 @@ export default function HomeScreen() {
   };
 
   const loadData = async (options?: { lightweight?: boolean; runtime?: typeof aiRuntime }) => {
-    const runtime = options?.runtime || aiRuntime;
+    const runtime = aiRuntime || options?.runtime;
     const lightweight = !!options?.lightweight;
     const vodLimit = lightweight ? runtime.homeBootVodLimit : runtime.homeVodPoolLimit;
     const seriesLimit = lightweight ? runtime.homeBootSeriesLimit : runtime.homeSeriesPoolLimit;
@@ -279,234 +345,172 @@ export default function HomeScreen() {
     setLiveChannels(quickLive);
     setFeaturedSeries(quickSeries);
 
-    InteractionManager.runAfterInteractions(() => {
-      void (async () => {
-        try {
-          const sampledVod = vodList.slice(0, runtime.homeProfileSampleLimit);
-          const sampledSeries = seriesList.slice(0, runtime.homeProfileSampleLimit);
-          const sampledLive = liveList.slice(0, Math.max(40, Math.floor(runtime.homeProfileSampleLimit / 2)));
+    // Filtrar conteúdo por categorias/gêneros
+    setActionMovies(filterContentByGenre(vodList.slice(0, 60), ['ação', 'action', 'aventura', 'adventure']).slice(0, 40));
+    setComedyMovies(filterContentByGenre(vodList.slice(0, 60), ['comédia', 'comedy', 'humor']).slice(0, 40));
+    setSciFiMovies(filterContentByGenre(vodList.slice(0, 60), ['ficção', 'ficção científica', 'sci-fi', 'science fiction', 'futurista']).slice(0, 40));
 
-          const planHasAlgorithm = aiEnabled
-            ? await subscriptionHasFeature('recommendation_algorithm')
-            : false;
+    setActionSeries(filterContentByGenre(seriesList.slice(0, 60), ['ação', 'action', 'aventura', 'adventure']).slice(0, 40));
+    setComedySeries(filterContentByGenre(seriesList.slice(0, 60), ['comédia', 'comedy', 'humor']).slice(0, 40));
+    setSciFiSeries(filterContentByGenre(seriesList.slice(0, 60), ['ficção', 'ficção científica', 'sci-fi', 'science fiction', 'futurista']).slice(0, 40));
 
-          let movieMeta: Record<string, TmdbMeta> = {};
-          let seriesMeta: Record<string, TmdbMeta> = {};
-          let highlights = vodList.slice(0, 12);
-          let launchMovies = vodList.slice(0, 40);
-          let launchSeries = seriesList.slice(0, 40);
-          let topSeries = seriesList.slice(0, 40);
+    setSportsLive(filterContentByGenre(liveList.slice(0, 80), ['esporte', 'sport', 'futebol', 'football', 'nba', 'tennis']).slice(0, 40));
+    setNewsLive(filterContentByGenre(liveList.slice(0, 80), ['notícia', 'news', 'jornalismo', 'journalism', 'tv cultura']).slice(0, 40));
 
-          if (runtime.enableTmdbEnrichment) {
-            [movieMeta, seriesMeta] = await Promise.all([
-              withTimeout(
-                buildTmdbMetadataForCatalog(
-                  sampledVod,
-                  'movie',
-                  (item) => toText(item.stream_id),
-                  (item) => sanitizeLabelText(item.title || item.name, '')
-                ),
-                runtime.homeEnrichTimeoutMs,
-                {} as Record<string, TmdbMeta>
-              ),
-              withTimeout(
-                buildTmdbMetadataForCatalog(
-                  sampledSeries,
-                  'tv',
-                  (item) => toText(item.series_id),
-                  (item) => sanitizeLabelText(item.title || item.name, '')
-                ),
-                runtime.homeEnrichTimeoutMs,
-                {} as Record<string, TmdbMeta>
-              ),
-            ]);
+    try {
+      const sampledVod = vodList.slice(0, runtime.homeProfileSampleLimit);
+      const sampledSeries = seriesList.slice(0, runtime.homeProfileSampleLimit);
+      const sampledLive = liveList.slice(0, Math.max(40, Math.floor(runtime.homeProfileSampleLimit / 2)));
 
-            [highlights, launchMovies, launchSeries, topSeries] = await Promise.all([
-              rankCatalogByTmdb(vodList, movieMeta, (item) => toText(item.stream_id), 'popular', 12),
-              rankCatalogByTmdb(vodList, movieMeta, (item) => toText(item.stream_id), 'release', 40),
-              rankCatalogByTmdb(seriesList, seriesMeta, (item) => toText(item.series_id), 'release', 40),
-              rankCatalogByTmdb(seriesList, seriesMeta, (item) => toText(item.series_id), 'rated', 40),
-            ]);
-          }
+      const planHasAlgorithm = aiEnabled
+        ? await subscriptionHasFeature('recommendation_algorithm')
+        : false;
 
-          if (version !== loadVersionRef.current) return;
+      let movieMeta: Record<string, TmdbMeta> = {};
+      let seriesMeta: Record<string, TmdbMeta> = {};
+      let highlights = vodList.slice(0, 12);
+      let launchMovies = vodList.slice(0, 40);
+      let launchSeries = seriesList.slice(0, 40);
+      let topSeries = seriesList.slice(0, 40);
 
-          setMovieTmdbMap(movieMeta);
-          setSeriesTmdbMap(seriesMeta);
+      if (runtime.enableTmdbEnrichment) {
+        [movieMeta, seriesMeta] = await Promise.all([
+          withTimeout(
+            buildTmdbMetadataForCatalog(
+              sampledVod,
+              'movie',
+              (item) => toText(item.stream_id),
+              (item) => sanitizeLabelText(item.title || item.name, '')
+            ),
+            runtime.homeEnrichTimeoutMs,
+            {} as Record<string, TmdbMeta>
+          ),
+          withTimeout(
+            buildTmdbMetadataForCatalog(
+              sampledSeries,
+              'tv',
+              (item) => toText(item.series_id),
+              (item) => sanitizeLabelText(item.title || item.name, '')
+            ),
+            runtime.homeEnrichTimeoutMs,
+            {} as Record<string, TmdbMeta>
+          ),
+        ]);
 
-          const taste = (() => {
-            if (!planHasAlgorithm) return Promise.resolve(null as UserTasteProfile | null);
+        [highlights, launchMovies, launchSeries, topSeries] = await Promise.all([
+          rankCatalogByTmdb(vodList, movieMeta, (item) => toText(item.stream_id), 'popular', 12),
+          rankCatalogByTmdb(vodList, movieMeta, (item) => toText(item.stream_id), 'release', 40),
+          rankCatalogByTmdb(seriesList, seriesMeta, (item) => toText(item.series_id), 'release', 40),
+          rankCatalogByTmdb(seriesList, seriesMeta, (item) => toText(item.series_id), 'rated', 40),
+        ]);
+      }
 
-            return (async () => {
-              const cachedProfile = getCachedTasteProfileSnapshot(snapshot.settings);
-              const persistedProfile = await getPersistedTasteProfileSnapshot(
-                snapshot.settings,
-                aiLearningWindowMs
-              );
+      if (version !== loadVersionRef.current) return;
 
-              const baseProfile = cachedProfile || persistedProfile;
-              if (baseProfile) {
-                setTasteProfile(baseProfile);
-              }
+      setMovieTmdbMap(movieMeta);
+      setSeriesTmdbMap(seriesMeta);
 
-              const shouldRefresh = await shouldRefreshTasteProfile(
-                snapshot.settings,
-                aiLearningWindowMs
-              );
+      const taste = (() => {
+        if (!planHasAlgorithm) return Promise.resolve(null as UserTasteProfile | null);
 
-              if (!shouldRefresh) {
-                return baseProfile || null;
-              }
-
-              const rebuilt = await Promise.race([
-                buildUserTasteProfile({
-                  settings: snapshot.settings,
-                  catalog: {
-                    vod: sampledVod,
-                    series: sampledSeries,
-                    liveStreams: sampledLive,
-                  },
-                  movieProgressMap: movieMap,
-                  seriesProgressMap: seriesMap,
-                }),
-                new Promise<UserTasteProfile | null>((resolve) => {
-                  setTimeout(() => resolve(baseProfile || null), 5000);
-                }),
-              ]);
-
-              return rebuilt || baseProfile || null;
-            })();
-          })();
-
-          const resolvedTaste = await taste;
-
-          if (version !== loadVersionRef.current) return;
-
-          setTasteProfile(resolvedTaste || null);
-
-          const rankedHighlights = resolvedTaste
-            ? rankContentByTaste(highlights, 'movie', resolvedTaste, 12)
-            : highlights.slice(0, 12);
-          const rankedMovies = resolvedTaste
-            ? rankContentByTaste(
-                launchMovies.length ? launchMovies : vodList.slice(0, 40),
-                'movie',
-                resolvedTaste,
-                40
-              )
-            : (launchMovies.length ? launchMovies : vodList.slice(0, 40)).slice(0, 40);
-          const rankedSeries = resolvedTaste
-            ? rankContentByTaste(
-                launchSeries.length ? launchSeries : topSeries.length ? topSeries : seriesList.slice(0, 40),
-                'series',
-                resolvedTaste,
-                40
-              )
-            : (launchSeries.length ? launchSeries : topSeries.length ? topSeries : seriesList.slice(0, 40)).slice(0, 40);
-          const rankedLive = resolvedTaste
-            ? rankContentByTaste(liveList, 'live', resolvedTaste, 40)
-            : liveList.slice(0, 40);
-
-          setFeaturedContent(rankedHighlights);
-          setPopularMovies(rankedMovies);
-          setLiveChannels(rankedLive);
-          setFeaturedSeries(rankedSeries);
-        } catch (error) {
-          console.error('[Home] Erro ao enriquecer conteúdo:', error);
-        } finally {
-          if (version === loadVersionRef.current) {
-            setIsAlgorithmLoading(false);
-          }
-        }
-      })();
-    });
-  };
-
-  const refreshProgressOnly = useCallback(async () => {
-    const nowTs = Date.now();
-    // Evita recalculos pesados em toda troca de foco da aba.
-    if (nowTs - focusRefreshAtRef.current < aiRuntime.homeFocusRefreshThrottleMs) {
-      return;
-    }
-    focusRefreshAtRef.current = nowTs;
-
-    const [movieMap, seriesMap, snapshot] = await Promise.all([
-      loadMovieProgressMap(),
-      loadSeriesProgressMap(),
-      loadAccessSnapshot(),
-    ]);
-    setMovieProgressMap(movieMap);
-    setSeriesProgressMap(seriesMap);
-    setAccess(snapshot);
-
-    InteractionManager.runAfterInteractions(() => {
-      void (async () => {
-        try {
-          if (!hasRecommendationAlgorithm || !(await subscriptionHasFeature('recommendation_algorithm'))) {
-            setTasteProfile(null);
-            return;
-          }
-
+        return (async () => {
           const cachedProfile = getCachedTasteProfileSnapshot(snapshot.settings);
           const persistedProfile = await getPersistedTasteProfileSnapshot(
             snapshot.settings,
             aiLearningWindowMs
           );
-          if (cachedProfile) {
-            setTasteProfile(cachedProfile);
-          } else if (persistedProfile) {
-            setTasteProfile(persistedProfile);
+
+          const baseProfile = cachedProfile || persistedProfile;
+          if (baseProfile) {
+            setTasteProfile(baseProfile);
           }
 
-          // Em aparelhos mais fortes, o usuario pode permitir recálculo no foco.
-          if (!aiRuntime.recomputeOnHomeFocus) {
-            return;
-          }
+          const shouldRefresh = await shouldRefreshTasteProfile(
+            snapshot.settings,
+            aiLearningWindowMs
+          );
 
-          const shouldRefresh = await shouldRefreshTasteProfile(snapshot.settings, aiLearningWindowMs);
           if (!shouldRefresh) {
-            return;
+            return baseProfile || null;
           }
 
-          const [vodSample, seriesSample, liveSample] = await Promise.all([
-            withTimeout(
-              queryCatalogPage({ kind: 'vod', offset: 0, limit: Math.max(60, aiRuntime.homeProfileSampleLimit) }),
-              aiRuntime.homeQueryTimeoutMs,
-              [] as StreamItem[]
-            ),
-            withTimeout(
-              queryCatalogPage({ kind: 'series', offset: 0, limit: Math.max(60, aiRuntime.homeProfileSampleLimit) }),
-              aiRuntime.homeQueryTimeoutMs,
-              [] as StreamItem[]
-            ),
-            withTimeout(
-              queryCatalogPage({ kind: 'live', offset: 0, limit: Math.max(30, Math.floor(aiRuntime.homeProfileSampleLimit / 2)) }),
-              aiRuntime.homeQueryTimeoutMs,
-              [] as StreamItem[]
-            ),
-          ]);
-
-          const nextProfile = await Promise.race([
+          const rebuilt = await Promise.race([
             buildUserTasteProfile({
               settings: snapshot.settings,
-              catalog: { vod: vodSample, series: seriesSample, liveStreams: liveSample },
+              catalog: {
+                vod: sampledVod,
+                series: sampledSeries,
+                liveStreams: sampledLive,
+              },
               movieProgressMap: movieMap,
               seriesProgressMap: seriesMap,
             }),
             new Promise<UserTasteProfile | null>((resolve) => {
-              setTimeout(() => resolve(persistedProfile || cachedProfile || null), 5000);
+              setTimeout(() => resolve(baseProfile || null), 1000);
             }),
           ]);
 
-          if (nextProfile) {
-            setTasteProfile(nextProfile);
-          }
-        } catch (error) {
-          console.error('[Home:RefreshProgress] Erro ao atualizar perfil de recomendacao:', error);
-        }
+          return rebuilt || baseProfile || null;
+        })();
       })();
-    });
-  }, [aiLearningWindowMs, aiRuntime, hasRecommendationAlgorithm]);
+
+      const resolvedTaste = await taste;
+
+      if (version !== loadVersionRef.current) return;
+
+      setTasteProfile(resolvedTaste || null);
+
+      const rankedHighlights = resolvedTaste
+        ? rankContentByTaste(highlights, 'movie', resolvedTaste, 12)
+        : highlights.slice(0, 12);
+      const rankedMovies = resolvedTaste
+        ? rankContentByTaste(
+          launchMovies.length ? launchMovies : vodList.slice(0, 40),
+          'movie',
+          resolvedTaste,
+          40
+        )
+        : (launchMovies.length ? launchMovies : vodList.slice(0, 40)).slice(0, 40);
+      const rankedSeries = resolvedTaste
+        ? rankContentByTaste(
+          launchSeries.length ? launchSeries : topSeries.length ? topSeries : seriesList.slice(0, 40),
+          'series',
+          resolvedTaste,
+          40
+        )
+        : (launchSeries.length ? launchSeries : topSeries.length ? topSeries : seriesList.slice(0, 40)).slice(0, 40);
+      const rankedLive = resolvedTaste
+        ? rankContentByTaste(liveList, 'live', resolvedTaste, 40)
+        : liveList.slice(0, 40);
+
+      setFeaturedContent(rankedHighlights);
+      setPopularMovies(rankedMovies);
+      setLiveChannels(rankedLive);
+      setFeaturedSeries(rankedSeries);
+
+      // Atualizar conteúdo categorizado com ranking
+      const vodToFilter = launchMovies.length ? launchMovies : vodList.slice(0, 40);
+      const seriesToFilter = launchSeries.length ? launchSeries : topSeries.length ? topSeries : seriesList.slice(0, 40);
+      const liveToFilter = liveList.slice(0, 40);
+
+      setActionMovies(filterContentByGenre(vodToFilter, ['ação', 'action', 'aventura', 'adventure']).slice(0, 40));
+      setComedyMovies(filterContentByGenre(vodToFilter, ['comédia', 'comedy', 'humor']).slice(0, 40));
+      setSciFiMovies(filterContentByGenre(vodToFilter, ['ficção', 'ficção científica', 'sci-fi', 'science fiction', 'futurista']).slice(0, 40));
+
+      setActionSeries(filterContentByGenre(seriesToFilter, ['ação', 'action', 'aventura', 'adventure']).slice(0, 40));
+      setComedySeries(filterContentByGenre(seriesToFilter, ['comédia', 'comedy', 'humor']).slice(0, 40));
+      setSciFiSeries(filterContentByGenre(seriesToFilter, ['ficção', 'ficção científica', 'sci-fi', 'science fiction', 'futurista']).slice(0, 40));
+
+      setSportsLive(filterContentByGenre(liveToFilter, ['esporte', 'sport', 'futebol', 'football', 'nba', 'tennis']).slice(0, 40));
+      setNewsLive(filterContentByGenre(liveToFilter, ['notícia', 'news', 'jornalismo', 'journalism', 'tv cultura']).slice(0, 40));
+    } catch (error) {
+      console.error('[Home] Erro ao enriquecer conteúdo:', error);
+    } finally {
+      if (version === loadVersionRef.current) {
+        setIsAlgorithmLoading(false);
+      }
+    }
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -514,7 +518,6 @@ export default function HomeScreen() {
       await Promise.allSettled([loadUser(), loadData({ lightweight: false })]);
     } finally {
       setRefreshing(false);
-      setIsLoading(false);
     }
   };
 
@@ -539,20 +542,15 @@ export default function HomeScreen() {
           return;
         }
 
-        // Primeira fase: hidratação leve para tela ficar responsiva rapidamente.
-        await Promise.allSettled([loadUser(), loadData({ lightweight: true, runtime })]);
-        setIsLoading(false);
+        await loadData();
 
-        // Segunda fase: após interações iniciais, carrega catálogo completo sem bloquear UI.
-        InteractionManager.runAfterInteractions(() => {
-          void loadData({ lightweight: false, runtime });
-        });
       } finally {
         setIsLoading(false);
       }
     };
 
     bootstrap();
+
   }, []);
 
   useEffect(() => {
@@ -568,24 +566,7 @@ export default function HomeScreen() {
     };
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      void (async () => {
-        const settings = await loadAiSettings();
-        const runtime = await loadAiRuntimeTuning(settings);
-        setAiEnabled(settings.enabled);
-        setAiRuntime(runtime);
-        setAiLearningWindowMs(
-          settings.learningWindow === '1d'
-            ? 1000 * 60 * 60 * 24
-            : settings.learningWindow === '7d'
-              ? 1000 * 60 * 60 * 24 * 7
-              : 1000 * 60 * 60 * 24 * 2
-        );
-      })();
-      void refreshProgressOnly();
-    }, [refreshProgressOnly])
-  );
+
 
   const normalizedSearch = homeSearch.trim().toLowerCase();
 
@@ -601,54 +582,52 @@ export default function HomeScreen() {
 
     void recordSearchEvent(normalizedSearch, 'home');
 
-    InteractionManager.runAfterInteractions(() => {
-      void (async () => {
-        const [movies, series, live] = await Promise.all([
-          queryCatalogPage({ kind: 'vod', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
-          queryCatalogPage({ kind: 'series', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
-          queryCatalogPage({ kind: 'live', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
-        ]);
+    void (async () => {
+      const [movies, series, live] = await Promise.all([
+        queryCatalogPage({ kind: 'vod', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
+        queryCatalogPage({ kind: 'series', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
+        queryCatalogPage({ kind: 'live', search: normalizedSearch, offset: 0, limit: HOME_SEARCH_LIMIT }),
+      ]);
 
-        if (canceled) return;
+      if (canceled) return;
 
-        const mappedMovies = movies.map((item) => ({
-          id: `search-movie-${toText(item.stream_id)}`,
-          type: 'movie' as const,
-          title: sanitizeLabelText(item.title || item.name, 'Filme'),
-          subtitle: 'Filme',
-          image: movieTmdbMap[toText(item.stream_id)]?.posterUrl || toText(item.stream_icon || item.cover),
-          data: item,
-        }));
+      const mappedMovies = movies.map((item) => ({
+        id: `search-movie-${toText(item.stream_id)}`,
+        type: 'movie' as const,
+        title: sanitizeLabelText(item.title || item.name, 'Filme'),
+        subtitle: 'Filme',
+        image: movieTmdbMap[toText(item.stream_id)]?.posterUrl || toText(item.stream_icon || item.cover),
+        data: item,
+      }));
 
-        const mappedSeries = series.map((item) => ({
-          id: `search-series-${toText(item.series_id)}`,
-          type: 'series' as const,
-          title: sanitizeLabelText(item.title || item.name, 'Serie'),
-          subtitle: 'Serie',
-          image: seriesTmdbMap[toText(item.series_id)]?.posterUrl || toText(item.stream_icon || item.cover),
-          data: item,
-        }));
+      const mappedSeries = series.map((item) => ({
+        id: `search-series-${toText(item.series_id)}`,
+        type: 'series' as const,
+        title: sanitizeLabelText(item.title || item.name, 'Serie'),
+        subtitle: 'Serie',
+        image: seriesTmdbMap[toText(item.series_id)]?.posterUrl || toText(item.stream_icon || item.cover),
+        data: item,
+      }));
 
-        const mappedLive = live.map((item) => ({
-          id: `search-live-${toText(item.stream_id)}`,
-          type: 'live' as const,
-          title: sanitizeLabelText(item.name || item.title, 'Canal ao vivo'),
-          subtitle: 'TV ao vivo',
-          image: toText(item.stream_icon || item.cover),
-          data: item,
-        }));
+      const mappedLive = live.map((item) => ({
+        id: `search-live-${toText(item.stream_id)}`,
+        type: 'live' as const,
+        title: sanitizeLabelText(item.name || item.title, 'Canal ao vivo'),
+        subtitle: 'TV ao vivo',
+        image: toText(item.stream_icon || item.cover),
+        data: item,
+      }));
 
-        const merged = [...mappedMovies, ...mappedSeries, ...mappedLive].slice(0, HOME_SEARCH_LIMIT * 3);
-        setSearchResults(
-          access
-            ? filterBlockedContent(access, merged, (item) => `${item.title} ${item.subtitle}`)
-            : merged
-        );
-      })().catch(() => {
-        if (!canceled) {
-          setSearchResults([]);
-        }
-      });
+      const merged = [...mappedMovies, ...mappedSeries, ...mappedLive].slice(0, HOME_SEARCH_LIMIT * 3);
+      setSearchResults(
+        access
+          ? filterBlockedContent(access, merged, (item) => `${item.title} ${item.subtitle}`)
+          : merged
+      );
+    })().catch(() => {
+      if (!canceled) {
+        setSearchResults([]);
+      }
     });
 
     return () => {
@@ -731,9 +710,9 @@ export default function HomeScreen() {
           return { seriesId, latestEpisode };
         })
         .filter(Boolean) as Array<{
-        seriesId: string;
-        latestEpisode: [string, { progress: number; positionMs: number; updatedAt: string }];
-      }>;
+          seriesId: string;
+          latestEpisode: [string, { progress: number; positionMs: number; updatedAt: string }];
+        }>;
 
       const [movieById, seriesById] = await Promise.all([
         queryCatalogItemsByIds(
@@ -1487,6 +1466,7 @@ export default function HomeScreen() {
                 initialNumToRender={3}
                 maxToRenderPerBatch={3}
                 windowSize={3}
+                onContentSizeChange={() => setIsLoading(false)}
                 updateCellsBatchingPeriod={55}
                 renderItem={({ item: live }) => (
                   <LiveCard

@@ -261,6 +261,10 @@ export default function ConfiguracoesBackupScreen() {
 
   const nextRefreshAt = getNextCatalogRefreshAt(lastCatalogSyncAt, refreshPeriod);
 
+  
+
+
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -444,6 +448,7 @@ export default function ConfiguracoesBackupScreen() {
               );
             })}
           </View>
+          <ActionButton text="Sincronizar agora" icon="sync" onPress={()=>(router.replace('/loading'))} disabled={actionButtonsDisabled} />
         </View>
       </ScrollView>
     </SafeAreaView>

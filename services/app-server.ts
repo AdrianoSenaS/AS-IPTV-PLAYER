@@ -1,5 +1,6 @@
 import {
   PRODUCTION_API_BASE_URL,
+  LOCAL_API_BASE_URL,
   normalizeApiBaseUrl,
   getConfiguredApiBaseUrl,
   setConfiguredApiBaseUrl,

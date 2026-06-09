@@ -428,7 +428,7 @@ export default function SeriesScreen() {
 
       <FlatList
         data={filtered}
-        numColumns={2}
+        numColumns={3}
         removeClippedSubviews
         initialNumToRender={12}
         maxToRenderPerBatch={12}
@@ -530,18 +530,7 @@ export default function SeriesScreen() {
                   Continuar: S{summary.continueSeason} E{summary.continueEpisode}
                 </Text>
               )}
-              <TouchableOpacity
-                style={[styles.downloadQuickBtn, downloadLocked && styles.downloadQuickBtnLocked]}
-                onPress={() => quickDownloadSeries(item)}>
-                <MaterialIcons
-                  name={downloadLocked ? 'workspace-premium' : 'download'}
-                  size={14}
-                  color={StreamingTheme.colors.textPrimary}
-                />
-                <Text style={styles.downloadQuickText}>
-                  {downloadLocked ? 'Download Premium' : seriesJobs.length > 0 ? 'Baixando' : 'Baixar'}
-                </Text>
-              </TouchableOpacity>
+             
             </TouchableOpacity>
           );
         }}

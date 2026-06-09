@@ -108,10 +108,10 @@ const PLAYER_FALLBACK = {
   duration: 0,
   muted: false,
   volume: 1,
-  play() {},
-  pause() {},
+  play() { },
+  pause() { },
   addListener() {
-    return { remove() {} };
+    return { remove() { } };
   },
 } as any;
 
@@ -264,7 +264,7 @@ export default function PlayerScreen() {
 
   // Carrega preferência de proxy ao montar
   React.useEffect(() => {
-    isProxyEnabled().then((v) => setProxyEnabledState(v)).catch(() => {});
+    isProxyEnabled().then((v) => setProxyEnabledState(v)).catch(() => { });
   }, []);
 
   // Inicia/para heartbeat quando proxy ativo
@@ -292,13 +292,13 @@ export default function PlayerScreen() {
   React.useEffect(() => {
     if (isCastConnected || isPreCastMode) {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT)
-        .catch(() => {});
+        .catch(() => { });
     } else {
       // Volta para o estado anterior quando desconecta
-      ScreenOrientation.unlockAsync().catch(() => {});
+      ScreenOrientation.unlockAsync().catch(() => { });
     }
     return () => {
-      ScreenOrientation.unlockAsync().catch(() => {});
+      ScreenOrientation.unlockAsync().catch(() => { });
     };
   }, [isCastConnected, isPreCastMode]);
 
@@ -347,7 +347,7 @@ export default function PlayerScreen() {
       }
       return;
     }
-    
+
     // Entra no pre-cast: salva volume atual e silencia
     try {
       precastModePreviousVolumeRef.current = volume;
@@ -717,7 +717,7 @@ export default function PlayerScreen() {
 
   const castSeekTo = (targetSec: number) => {
     if (!remoteMediaClient) return;
-    remoteMediaClient.seek({ position: Math.max(0, Number(targetSec || 0)) }).catch(() => {});
+    remoteMediaClient.seek({ position: Math.max(0, Number(targetSec || 0)) }).catch(() => { });
   };
 
   const castSeek = (deltaSec: number) => {
@@ -728,8 +728,8 @@ export default function PlayerScreen() {
 
   const toggleCastPlayPause = () => {
     if (!remoteMediaClient) return;
-    if (castIsPlaying) { remoteMediaClient.pause().catch(() => {}); }
-    else { remoteMediaClient.play().catch(() => {}); }
+    if (castIsPlaying) { remoteMediaClient.pause().catch(() => { }); }
+    else { remoteMediaClient.play().catch(() => { }); }
   };
 
   const applyPendingStartPosition = () => {
@@ -770,10 +770,10 @@ export default function PlayerScreen() {
     // Mantém playback em background se Cast está conectado
     // (PiP é gerenciado automaticamente pelo sistema)
     keepPlaybackOnExitRef.current = isCastConnected;
-    
+
     await persistExactProgress();
     setIsPlaybackRequested(false);
-    
+
     if (!isCastConnected) {
       clearMiniPlayerState();
     }
@@ -852,7 +852,7 @@ export default function PlayerScreen() {
         volumeRef.current = sysVol;
         lastSystemVolumeRef.current = sysVol;
       })
-      .catch(() => {});
+      .catch(() => { });
 
     const volSub = VolumeManager.addVolumeListener((result: { volume: number }) => {
       const nextValue = Math.max(0, Math.min(1, Number(result.volume ?? 1)));
@@ -887,7 +887,7 @@ export default function PlayerScreen() {
       return;
     }
     lastCastVolumePushRef.current = next;
-    remoteMediaClient.setStreamVolume(next).catch(() => {});
+    remoteMediaClient.setStreamVolume(next).catch(() => { });
   }, [volume, isCastConnected, remoteMediaClient]);
 
   useEffect(() => {
@@ -995,7 +995,7 @@ export default function PlayerScreen() {
       if (nextState !== 'active') {
         persistExactProgress();
         stopProxyHeartbeat();
-        closeProxySession().catch(() => {});
+        closeProxySession().catch(() => { });
       } else {
         // Fecha o teclado ao voltar do background
         Keyboard.dismiss();
@@ -1006,7 +1006,7 @@ export default function PlayerScreen() {
     return () => {
       persistExactProgress();
       stopProxyHeartbeat();
-      closeProxySession().catch(() => {});
+      closeProxySession().catch(() => { });
       subscription.remove();
     };
   }, [mode, contentId, seriesId, playlist, playlistIndex]);
@@ -1280,11 +1280,11 @@ export default function PlayerScreen() {
     if (isLocked) return;
     if (status.isPlaying) {
       setIsPlaybackRequested(false);
-      try { playbackPlayer.pause(); } catch {}
+      try { playbackPlayer.pause(); } catch { }
       return;
     }
     setIsPlaybackRequested(true);
-    try { playbackPlayer.play(); } catch {}
+    try { playbackPlayer.play(); } catch { }
   };
 
   const seekTo = async (value: number) => {
@@ -1303,7 +1303,7 @@ export default function PlayerScreen() {
         setHasFirstFrame(false);
       }
       setTimeout(() => {
-        try { playbackPlayer.play(); } catch {}
+        try { playbackPlayer.play(); } catch { }
       }, 200);
       if (deltaMs >= MANUAL_RT_SYNC_MIN_DELTA_MS) {
         sendRealtimeWatchingUpdate({ positionMs: nextPosition, durationMs: currentDuration });
@@ -1383,11 +1383,11 @@ export default function PlayerScreen() {
               clearTimeout(volumeSyncTimerRef.current);
             }
             volumeSyncTimerRef.current = setTimeout(() => {
-              VolumeManager?.setVolume?.(nextValue, { showUI: false, type: 'music' }).catch(() => {});
+              VolumeManager?.setVolume?.(nextValue, { showUI: false, type: 'music' }).catch(() => { });
               volumeSyncTimerRef.current = null;
             }, 40);
           } else {
-            VolumeManager.setVolume(nextValue, { showUI: true, type: 'music' }).catch(() => {});
+            VolumeManager.setVolume(nextValue, { showUI: true, type: 'music' }).catch(() => { });
           }
         }
       }
@@ -1745,7 +1745,7 @@ export default function PlayerScreen() {
           setSourceUrl(nextUrl);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [proxyEnabled, canUseProxy, sourceUrl]);
 
   const requestCast = async () => {
@@ -1824,7 +1824,7 @@ export default function PlayerScreen() {
               });
 
               // Alguns receivers iniciam pausados mesmo com autoplay=true.
-              await remoteMediaClient.play().catch(() => {});
+              await remoteMediaClient.play().catch(() => { });
 
               loaded = true;
               break;
@@ -2200,10 +2200,10 @@ export default function PlayerScreen() {
               value={castVolume}
               onValueChange={(v) => {
                 setCastVolume(v);
-                remoteMediaClient?.setStreamVolume(v).catch(() => {});
+                remoteMediaClient?.setStreamVolume(v).catch(() => { });
               }}
               onSlidingComplete={(v) =>
-                remoteMediaClient?.setStreamVolume(v).catch(() => {})
+                remoteMediaClient?.setStreamVolume(v).catch(() => { })
               }
               minimumValue={0}
               maximumValue={1}
@@ -2255,7 +2255,7 @@ export default function PlayerScreen() {
                 // Força autoplay ao renderizar primeiro frame
                 setIsPlaybackRequested(true);
                 setTimeout(() => {
-                  try { playbackPlayer.play(); } catch {}
+                  try { playbackPlayer.play(); } catch { }
                 }, 100);
               }}
               onPictureInPictureStart={() => {
@@ -2413,47 +2413,48 @@ export default function PlayerScreen() {
             </View>
 
             <View style={styles.bottomPanel}>
+              {mode !== 'live' && (
+                <>
+                  {isScrubbing && (
+                    <View style={styles.scrubPreviewCard}>
+                      <MaterialIcons name="preview" size={16} color={StreamingTheme.colors.textPrimary} />
+                      <Text style={styles.scrubPreviewText}>{formatMs(scrubPreviewMs)}</Text>
+                    </View>
+                  )}
+                  <Slider
+                    value={progress}
+                    onSlidingStart={() => {
+                      setIsScrubbing(true);
+                      setScrubPreviewMs(position);
+                    }}
+                    onValueChange={(value) => {
+                      if (!duration) return;
+                      setScrubPreviewMs(Math.floor(value * duration));
+                    }}
+                    onSlidingComplete={async (value) => {
+                      await seekTo(value);
+                      setIsScrubbing(false);
+                    }}
+                    minimumValue={0}
+                    maximumValue={1}
+                    minimumTrackTintColor={StreamingTheme.colors.accent}
+                    maximumTrackTintColor="rgba(255,255,255,0.2)"
+                    thumbTintColor={StreamingTheme.colors.textPrimary}
+                    style={{ marginTop: 12 }}
+                  />
+                  <View style={styles.timeRow}>
+                    <Text style={styles.timeText}>{formatMs(position)}</Text>
+                    <Text style={styles.timeText}>{formatMs(duration)}</Text>
+                  </View>
+                </>
+              )}
               <View style={styles.actionsRow}>
-                              {/* Barra de progresso sempre no final do painel */}
-                              {mode !== 'live' && (
-                                <>
-                                  {isScrubbing && (
-                                    <View style={styles.scrubPreviewCard}>
-                                      <MaterialIcons name="preview" size={16} color={StreamingTheme.colors.textPrimary} />
-                                      <Text style={styles.scrubPreviewText}>{formatMs(scrubPreviewMs)}</Text>
-                                    </View>
-                                  )}
-                                  <Slider
-                                    value={progress}
-                                    onSlidingStart={() => {
-                                      setIsScrubbing(true);
-                                      setScrubPreviewMs(position);
-                                    }}
-                                    onValueChange={(value) => {
-                                      if (!duration) return;
-                                      setScrubPreviewMs(Math.floor(value * duration));
-                                    }}
-                                    onSlidingComplete={async (value) => {
-                                      await seekTo(value);
-                                      setIsScrubbing(false);
-                                    }}
-                                    minimumValue={0}
-                                    maximumValue={1}
-                                    minimumTrackTintColor={StreamingTheme.colors.accent}
-                                    maximumTrackTintColor="rgba(255,255,255,0.2)"
-                                    thumbTintColor={StreamingTheme.colors.textPrimary}
-                                    style={{ marginTop: 12 }}
-                                  />
-                                  <View style={styles.timeRow}>
-                                    <Text style={styles.timeText}>{formatMs(position)}</Text>
-                                    <Text style={styles.timeText}>{formatMs(duration)}</Text>
-                                  </View>
-                                </>
-                              )}
+
+
                 {canUsePip && (
                   <TouchableOpacity style={styles.actionBtn} onPress={openPip}>
                     <MaterialIcons name="picture-in-picture-alt" size={20} color={StreamingTheme.colors.textPrimary} />
-                    <Text style={styles.actionLabel}>{Platform.OS === 'android' ? 'Mini app' : 'PiP'}</Text>
+                    <Text style={styles.actionLabel}>{Platform.OS === 'android' ? 'Mini Player' : 'Mini Player'}</Text>
                   </TouchableOpacity>
                 )}
                 {canUseCastMirror && (
@@ -2519,7 +2520,7 @@ export default function PlayerScreen() {
 
       <Modal visible={showSettings} transparent animationType="fade" onRequestClose={() => setShowSettings(false)}>
         <TouchableOpacity style={styles.settingsBackdrop} activeOpacity={1} onPress={() => setShowSettings(false)}>
-          <TouchableOpacity activeOpacity={1} style={styles.settingsModalCard} onPress={() => {}}>
+          <TouchableOpacity activeOpacity={1} style={styles.settingsModalCard} onPress={() => { }}>
             <View style={styles.settingsModalHeader}>
               <Text style={styles.settingsModalTitle}>Opcoes do player</Text>
               <TouchableOpacity style={styles.iconBtn} onPress={() => setShowSettings(false)}>

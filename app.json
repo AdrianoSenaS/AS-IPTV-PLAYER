@@ -2,7 +2,7 @@
   "expo": {
     "name": "As Iptv Player",
     "slug": "as-iptv",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "asiptv",
@@ -18,7 +18,7 @@
     "android": {
       "package": "com.adrianosena.asiptv",
       "icon": "./assets/images/icon.png",
-      "versionCode": 5,
+      "versionCode": 6,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "INTERNET",

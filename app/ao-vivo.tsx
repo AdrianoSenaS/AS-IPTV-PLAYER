@@ -366,7 +366,7 @@ export default function AoVivoScreen() {
 
       <FlatList
         data={filtered}
-        numColumns={2}
+        numColumns={3}
         removeClippedSubviews
         initialNumToRender={14}
         maxToRenderPerBatch={14}

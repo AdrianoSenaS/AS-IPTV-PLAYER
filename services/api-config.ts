@@ -6,7 +6,7 @@ export const API_BASE_URL_STORAGE_KEY = 'realtimeServer.url';
 export const API_ENV_STORAGE_KEY = 'api.environment';
 
 export const PRODUCTION_API_BASE_URL = 'https://www.asiptv.com.br';
-export const LOCAL_API_BASE_URL = 'http://10.0.0.183:3001';
+export const LOCAL_API_BASE_URL = 'http://192.168.239.169:3001';
 export const CONNECTIVITY_PROBE_URL = 'https://clients3.google.com/generate_204';
 
 export function normalizeApiBaseUrl(input: string): string {
@@ -40,6 +40,7 @@ function isLocalUrl(url: string): boolean {
     lower.includes('10.0.0.') ||
     lower.includes('192.168.') ||
     lower.includes('localhost') ||
+    lower.includes('192.168.239.169') ||
     lower.includes('127.0.0.1')
   );
 }

@@ -446,18 +446,7 @@ export default function FilmesScreen() {
 						seed={`movie-${toText(item.stream_id)}-${toText(item.title || item.name)}`}
 					/>
 				)}
-				<TouchableOpacity
-					style={[styles.downloadQuickBtn, downloadLocked && styles.downloadQuickBtnLocked]}
-					onPress={() => quickDownloadMovie(item)}>
-					<MaterialIcons
-						name={downloadLocked ? 'workspace-premium' : 'download'}
-						size={14}
-						color={StreamingTheme.colors.textPrimary}
-					/>
-					<Text style={styles.downloadQuickText}>
-						{downloadLocked ? 'Download Premium' : downloadPct > 0 ? 'Baixando' : 'Baixar'}
-					</Text>
-				</TouchableOpacity>
+				
 			</TouchableOpacity>
 		);
 	}, [tmdbMap, progressMap, downloadProgressByMovieId, hideImages, tasteProfile, downloadLocked]);
@@ -522,7 +511,7 @@ export default function FilmesScreen() {
 
 			<FlatList
 				data={filtered}
-				numColumns={2}
+				numColumns={3}
 				removeClippedSubviews
 				initialNumToRender={12}
 				maxToRenderPerBatch={12}
