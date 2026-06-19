@@ -114,3 +114,24 @@ export async function pruneDbValuesByPrefixOlderThan(prefix: string, maxAgeMs: n
     return 0;
   }
 }
+
+export async function getDbValuesByPrefix(prefix: string, limit?: number) {
+  try {
+    if (!prefix) return [];
+    await ensureReady();
+    const db = await getDb();
+    const likePattern = `${prefix}%`;
+    const query = `SELECT key, value, updatedAt FROM kv_store WHERE key LIKE ? ORDER BY updatedAt DESC${limit ? ' LIMIT ' + Number(limit) : ''}`;
+    const rows = await db.getAllAsync<{ key: string; value: string; updatedAt: string }>(query, likePattern);
+    return (rows || []).map((r) => {
+      try {
+        return { key: r.key, value: JSON.parse(r.value), updatedAt: r.updatedAt };
+      } catch {
+        return { key: r.key, value: null, updatedAt: r.updatedAt };
+      }
+    });
+  } catch (err) {
+    console.error('[LocalDB] Erro ao listar valores por prefixo:', err);
+    return [];
+  }
+}

@@ -72,3 +72,15 @@ export async function saveProfileScopedValue<T>(key: string, nextValue: T): Prom
     profiles,
   });
 }
+
+// Convenience for appending a value scoped to the active profile under a key prefix.
+export async function appendProfileScopedValue<T>(keyPrefix: string, value: T): Promise<void> {
+  const profileId = await getActiveProfileScopeId();
+  const key = `${keyPrefix}.${profileId}.${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+  await setDbValue<T>(key, value);
+}
+
+export async function getProfileScopedKeyPrefix(keyPrefix: string, profileId?: string): Promise<string> {
+  const activeProfileId = profileId || (await getActiveProfileScopeId());
+  return `${keyPrefix}.${activeProfileId}.`;
+}

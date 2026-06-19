@@ -187,7 +187,7 @@ export default function LoginScreen() {
       }
     };
 
-    bootstrap();
+    //bootstrap();
     return () => {
       mounted = false;
     };

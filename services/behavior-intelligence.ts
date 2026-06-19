@@ -1,6 +1,11 @@
-import { getDbValue, setDbValue } from '@/services/local-db';
+import { getDbValue, setDbValue, getDbValuesByPrefix, removeDbValue } from '@/services/local-db';
 import { scheduleAutoCloudBackup } from '@/services/backup-background';
-import { loadProfileScopedValue, saveProfileScopedValue } from '@/services/profile-scoped-storage';
+import {
+  loadProfileScopedValue,
+  saveProfileScopedValue,
+  appendProfileScopedValue,
+  getProfileScopedKeyPrefix,
+} from '@/services/profile-scoped-storage';
 import { reportSearchQuery } from '@/services/realtime-presence';
 import { isNonMobileDevice } from '@/services/device-profile';
 
@@ -72,19 +77,49 @@ function hourFromIso(iso: string) {
 
 async function loadBehaviorEventsInternal(): Promise<BehaviorEvent[]> {
   try {
-    const raw = await loadProfileScopedValue<BehaviorEvent[]>(BEHAVIOR_KEY, []);
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .filter((entry) => entry && entry.type && entry.value)
-      .map((entry) => ({
-        id: String(entry.id || `${entry.type}-${entry.value}-${entry.at || Date.now()}`),
-        type: entry.type as BehaviorEventType,
-        value: String(entry.value || ''),
-        context: String(entry.context || 'global'),
-        at: String(entry.at || new Date().toISOString()),
-        weight: clamp(Number(entry.weight || 1), 0.1, 8),
-      }))
-      .sort((a, b) => (a.at > b.at ? -1 : 1));
+    // Legacy array-based storage used by older versions.
+    const legacy = await loadProfileScopedValue<BehaviorEvent[]>(BEHAVIOR_KEY, []);
+    const perKeyPrefix = await getProfileScopedKeyPrefix(BEHAVIOR_KEY);
+    const per = await getDbValuesByPrefix(perKeyPrefix, MAX_EVENTS);
+
+    const perEvents: BehaviorEvent[] = (per || [])
+      .map((r) => {
+        const v = r.value as Partial<BehaviorEvent> | null;
+        if (!v || !v.type || !v.value) return null;
+        return {
+          id: String(v.id || `${v.type}-${v.value}-${v.at || Date.now()}`),
+          type: String(v.type) as BehaviorEventType,
+          value: String(v.value || ''),
+          context: String(v.context || 'global'),
+          at: String(v.at || r.updatedAt || new Date().toISOString()),
+          weight: clamp(Number(v.weight || 1), 0.1, 8),
+        } as BehaviorEvent;
+      })
+      .filter(Boolean) as BehaviorEvent[];
+
+    const legacyEvents: BehaviorEvent[] = Array.isArray(legacy)
+      ? legacy
+          .filter((entry) => entry && entry.type && entry.value)
+          .map((entry) => ({
+            id: String(entry.id || `${entry.type}-${entry.value}-${entry.at || Date.now()}`),
+            type: entry.type as BehaviorEventType,
+            value: String(entry.value || ''),
+            context: String(entry.context || 'global'),
+            at: String(entry.at || new Date().toISOString()),
+            weight: clamp(Number(entry.weight || 1), 0.1, 8),
+          }))
+      : [];
+
+    const combined = [...perEvents, ...legacyEvents];
+    const seen = new Set<string>();
+    return combined
+      .sort((a, b) => (a.at > b.at ? -1 : 1))
+      .filter((entry) => {
+        if (seen.has(entry.id)) return false;
+        seen.add(entry.id);
+        return true;
+      })
+      .slice(0, MAX_EVENTS);
   } catch {
     return [];
   }
@@ -277,24 +312,44 @@ async function appendBehaviorEvent(input: {
     weight: clamp(Number(input.weight || 1), 0.1, 8),
   };
 
-  const current = await loadBehaviorEventsInternal();
   const deDupMs = input.type === 'session' ? 30_000 : 90_000;
+  try {
+    const perKeyPrefix = await getProfileScopedKeyPrefix(BEHAVIOR_KEY);
+    const recent = await getDbValuesByPrefix(perKeyPrefix, 200);
+    const latestSame = (recent || []).find((row) => {
+      const v = row.value as Partial<BehaviorEvent> | null;
+      return !!v && v.type === incoming.type && v.value === incoming.value && v.context === incoming.context;
+    });
 
-  const latestSame = current.find(
-    (entry) =>
-      entry.type === incoming.type &&
-      entry.value === incoming.value &&
-      entry.context === incoming.context
-  );
-
-  if (latestSame) {
-    const ts = new Date(latestSame.at).getTime();
-    if (Number.isFinite(ts) && Math.abs(nowTs - ts) < deDupMs) {
-      return;
+    if (latestSame) {
+      const ts = new Date(latestSame.updatedAt).getTime();
+      if (Number.isFinite(ts) && Math.abs(nowTs - ts) < deDupMs) {
+        return;
+      }
     }
+  } catch {
+    // ignore DB lookup failures and continue appending
   }
 
-  await saveBehaviorEvents([incoming, ...current]);
+  await appendProfileScopedValue<BehaviorEvent>(BEHAVIOR_KEY, incoming);
+
+  void (async () => {
+    try {
+      await bumpBehaviorVersion();
+      scheduleAutoCloudBackup();
+
+      const perKeyPrefix = await getProfileScopedKeyPrefix(BEHAVIOR_KEY);
+      const rows = await getDbValuesByPrefix(perKeyPrefix);
+      if (rows && rows.length > MAX_EVENTS) {
+        const toRemove = rows.slice(MAX_EVENTS).map((row) => row.key);
+        for (const key of toRemove) {
+          await removeDbValue(key);
+        }
+      }
+    } catch {
+      // no-op
+    }
+  })();
 }
 
 export async function recordSearchEvent(query: string, context: string) {

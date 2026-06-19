@@ -26,42 +26,11 @@ function FloatingTabBackground() {
         colors={['rgba(255,255,255,0.10)', 'rgba(12,16,27,0.70)', 'rgba(7,9,20,0.92)']}
         style={StyleSheet.absoluteFill}
       />
-      <View style={floatStyles.glowPrimary} />
-      <View style={floatStyles.glowSecondary} />
-      <View style={floatStyles.topBorder} />
+      
     </View>
   );
 }
 
-const floatStyles = StyleSheet.create({
-  topBorder: {
-    position: 'absolute',
-    top: 0,
-    left: 22,
-    right: 22,
-    height: 1,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.20)',
-  },
-  glowPrimary: {
-    position: 'absolute',
-    top: -28,
-    left: 42,
-    width: 112,
-    height: 112,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,143,58,0.12)',
-  },
-  glowSecondary: {
-    position: 'absolute',
-    bottom: -26,
-    right: 44,
-    width: 96,
-    height: 96,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,59,48,0.12)',
-  },
-});
 
 export default function TabLayout() {
   const router = useRouter();
@@ -223,7 +192,7 @@ export default function TabLayout() {
           tabBarBackground: () => <FloatingTabBackground />,
           tabBarStyle: {
             position: 'absolute',
-            bottom: insets.bottom + 10,
+            bottom: 0,
             left: 16,
             right: 16,
             height: 84,

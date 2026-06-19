@@ -1,4 +1,5 @@
-import { getDbValue, removeDbValue, setDbValue } from '@/services/local-db';
+import { getDbValue, getDbValuesByPrefix, removeDbValue, setDbValue } from '@/services/local-db';
+import { getProfileScopedKeyPrefix } from '@/services/profile-scoped-storage';
 import { isNonMobileDevice } from '@/services/device-profile';
 import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -1035,7 +1036,16 @@ export async function saveCloudSyncPrefs(input: Partial<CloudSyncPrefs>) {
 async function buildBackupData(profileIdForSync = '') {
   const keyPairs = await Promise.all(
     (BACKUP_KEYS as unknown as string[]).map(async (key) => {
-      const val = await getDbValue<unknown>(key);
+      let val: unknown = await getDbValue<unknown>(key);
+      if (key === 'behavior.events.v1') {
+        const prefix = await getProfileScopedKeyPrefix(key, profileIdForSync || undefined);
+        const rows = await getDbValuesByPrefix(prefix);
+        if (rows && rows.length) {
+          val = rows
+            .map((row) => row.value)
+            .filter((value): value is unknown => value !== null && value !== undefined);
+        }
+      }
       const valueForBackup =
         profileIdForSync && PROFILE_SCOPED_BACKUP_KEYS.has(key)
           ? pickOnlyProfileFromScopedContainer(val, profileIdForSync)

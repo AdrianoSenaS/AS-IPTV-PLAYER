@@ -54,7 +54,7 @@ export function PageLoader({ visible, label = 'Carregando...' }: PageLoaderProps
         ]}
       >
         <GlassSurface style={styles.card} intensity={46}>
-          <View style={styles.loaderOrb} />
+         
           <ActivityIndicator size="large" color={StreamingTheme.colors.accentAlt} />
           <Text style={styles.label}>{label}</Text>
           <Text style={styles.caption}>Só um momento...</Text>
@@ -82,15 +82,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  loaderOrb: {
-    position: 'absolute',
-    top: -20,
-    right: -10,
-    width: 80,
-    height: 80,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,143,58,0.14)',
-  },
+  
   label: {
     color: StreamingTheme.colors.textPrimary,
     fontWeight: '800',

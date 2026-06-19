@@ -4,7 +4,6 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
 import {
   Alert,
   Animated,
@@ -120,15 +119,7 @@ type HomeSectionId =
 const HOME_SEARCH_LIMIT = 8;
 const HOME_STAGE_MOVIES = 1;
 const HOME_STAGE_SERIES = 2;
-const HOME_STAGE_ACTION_MOVIES = 3;
-const HOME_STAGE_COMEDY_MOVIES = 4;
-const HOME_STAGE_SCIFI_MOVIES = 5;
-const HOME_STAGE_ACTION_SERIES = 6;
-const HOME_STAGE_COMEDY_SERIES = 7;
-const HOME_STAGE_SCIFI_SERIES = 8;
 const HOME_STAGE_LIVE = 9;
-const HOME_STAGE_SPORTS_LIVE = 10;
-const HOME_STAGE_NEWS_LIVE = 11;
 const SECTION_VIEWABILITY_CONFIG = {
   itemVisiblePercentThreshold: 20,
   minimumViewTime: 120,
@@ -212,19 +203,11 @@ export default function HomeScreen() {
   const [aiLearningWindowMs, setAiLearningWindowMs] = useState(1000 * 60 * 60 * 24 * 2);
   const hasRecommendationAlgorithm = aiEnabled && hasFeature('recommendation_algorithm');
 
-  const [featuredContent, setFeaturedContent] = useState<StreamItem[]>([]);
+
   const [featuredItems, setFeaturedItems] = useState<FeaturedItem[]>([]);
   const [popularMovies, setPopularMovies] = useState<StreamItem[]>([]);
-  const [actionMovies, setActionMovies] = useState<StreamItem[]>([]);
-  const [comedyMovies, setComedyMovies] = useState<StreamItem[]>([]);
-  const [sciFiMovies, setSciFiMovies] = useState<StreamItem[]>([]);
   const [liveChannels, setLiveChannels] = useState<StreamItem[]>([]);
-  const [sportsLive, setSportsLive] = useState<StreamItem[]>([]);
-  const [newsLive, setNewsLive] = useState<StreamItem[]>([]);
   const [featuredSeries, setFeaturedSeries] = useState<StreamItem[]>([]);
-  const [actionSeries, setActionSeries] = useState<StreamItem[]>([]);
-  const [comedySeries, setComedySeries] = useState<StreamItem[]>([]);
-  const [sciFiSeries, setSciFiSeries] = useState<StreamItem[]>([]);
   const [homeSearch, setHomeSearch] = useState('');
   const [activeFeaturedIndex, setActiveFeaturedIndex] = useState(0);
   const [searchResults, setSearchResults] = useState<SearchItem[]>([]);
@@ -339,24 +322,11 @@ export default function HomeScreen() {
 
     const mixedFeatured = [...featureMovies, ...featureSeries].slice(0, 12);
 
-    setFeaturedContent(quickHighlights);
+   
     setFeaturedItems(mixedFeatured);
     setPopularMovies(quickMovies);
     setLiveChannels(quickLive);
     setFeaturedSeries(quickSeries);
-
-    // Filtrar conteúdo por categorias/gêneros
-    setActionMovies(filterContentByGenre(vodList.slice(0, 60), ['ação', 'action', 'aventura', 'adventure']).slice(0, 40));
-    setComedyMovies(filterContentByGenre(vodList.slice(0, 60), ['comédia', 'comedy', 'humor']).slice(0, 40));
-    setSciFiMovies(filterContentByGenre(vodList.slice(0, 60), ['ficção', 'ficção científica', 'sci-fi', 'science fiction', 'futurista']).slice(0, 40));
-
-    setActionSeries(filterContentByGenre(seriesList.slice(0, 60), ['ação', 'action', 'aventura', 'adventure']).slice(0, 40));
-    setComedySeries(filterContentByGenre(seriesList.slice(0, 60), ['comédia', 'comedy', 'humor']).slice(0, 40));
-    setSciFiSeries(filterContentByGenre(seriesList.slice(0, 60), ['ficção', 'ficção científica', 'sci-fi', 'science fiction', 'futurista']).slice(0, 40));
-
-    setSportsLive(filterContentByGenre(liveList.slice(0, 80), ['esporte', 'sport', 'futebol', 'football', 'nba', 'tennis']).slice(0, 40));
-    setNewsLive(filterContentByGenre(liveList.slice(0, 80), ['notícia', 'news', 'jornalismo', 'journalism', 'tv cultura']).slice(0, 40));
-
     try {
       const sampledVod = vodList.slice(0, runtime.homeProfileSampleLimit);
       const sampledSeries = seriesList.slice(0, runtime.homeProfileSampleLimit);
@@ -483,26 +453,12 @@ export default function HomeScreen() {
         ? rankContentByTaste(liveList, 'live', resolvedTaste, 40)
         : liveList.slice(0, 40);
 
-      setFeaturedContent(rankedHighlights);
+      
       setPopularMovies(rankedMovies);
       setLiveChannels(rankedLive);
       setFeaturedSeries(rankedSeries);
 
-      // Atualizar conteúdo categorizado com ranking
-      const vodToFilter = launchMovies.length ? launchMovies : vodList.slice(0, 40);
-      const seriesToFilter = launchSeries.length ? launchSeries : topSeries.length ? topSeries : seriesList.slice(0, 40);
-      const liveToFilter = liveList.slice(0, 40);
-
-      setActionMovies(filterContentByGenre(vodToFilter, ['ação', 'action', 'aventura', 'adventure']).slice(0, 40));
-      setComedyMovies(filterContentByGenre(vodToFilter, ['comédia', 'comedy', 'humor']).slice(0, 40));
-      setSciFiMovies(filterContentByGenre(vodToFilter, ['ficção', 'ficção científica', 'sci-fi', 'science fiction', 'futurista']).slice(0, 40));
-
-      setActionSeries(filterContentByGenre(seriesToFilter, ['ação', 'action', 'aventura', 'adventure']).slice(0, 40));
-      setComedySeries(filterContentByGenre(seriesToFilter, ['comédia', 'comedy', 'humor']).slice(0, 40));
-      setSciFiSeries(filterContentByGenre(seriesToFilter, ['ficção', 'ficção científica', 'sci-fi', 'science fiction', 'futurista']).slice(0, 40));
-
-      setSportsLive(filterContentByGenre(liveToFilter, ['esporte', 'sport', 'futebol', 'football', 'nba', 'tennis']).slice(0, 40));
-      setNewsLive(filterContentByGenre(liveToFilter, ['notícia', 'news', 'jornalismo', 'journalism', 'tv cultura']).slice(0, 40));
+      
     } catch (error) {
       console.error('[Home] Erro ao enriquecer conteúdo:', error);
     } finally {
